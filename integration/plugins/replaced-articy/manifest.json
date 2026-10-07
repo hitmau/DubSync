@@ -1,0 +1,12 @@
+{
+  "plugin_id": "replaced.articy",
+  "version": "0.1.0",
+  "api_version": 1,
+  "name": "REPLACED Articy Runtime",
+  "description": "Contrato inicial do adaptador REPLACED/Articy; o hook real ainda depende da validação do loader IL2CPP.",
+  "engines": ["Unity IL2CPP"],
+  "games": ["replaced"],
+  "capabilities": ["dialogue_start", "dialogue_end", "pause", "resume", "scene_changed", "external_audio"],
+  "entrypoint": "integration/adapters/replaced_articy.py",
+  "runtime_hook_confirmed": false
+}

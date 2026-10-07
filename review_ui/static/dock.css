@@ -1,0 +1,65 @@
+/* Painéis encaixáveis. A posição inicial continua sendo a grade original do DubSync. */
+.app-grid.dock-enabled{grid-template-rows:minmax(390px,var(--track-main,4.7fr)) minmax(145px,var(--track-review,1fr))}
+.app-grid.dock-enabled.no-bottom{grid-template-rows:minmax(390px,1fr) 44px}
+.dock-enabled .left-column,.dock-enabled .center-column,.dock-enabled .right-column,.dock-enabled .dock-bottom{display:flex;gap:0;min-width:0;min-height:0;overflow:auto;scrollbar-color:#334865 transparent;scrollbar-width:thin}
+.dock-enabled .left-column,.dock-enabled .center-column,.dock-enabled .right-column{flex-direction:column}
+.dock-enabled .dock-bottom{grid-column:2/4;grid-row:2;flex-direction:row}
+.dock-enabled.no-bottom .dock-bottom{display:flex}
+.dock-enabled.no-bottom [data-resize="app-review-row"]{display:none}
+.dock-zone:empty::after{content:"Solte um painel aqui";display:grid;place-items:center;min-height:44px;flex:1;border:1px dashed #3a5d85;border-radius:5px;color:#7794b6;font-size:10px}
+.dock-enabled .dock-bottom:empty::after{min-width:160px}
+.dock-group{display:flex;flex-direction:column;flex:var(--dock-weight,1) 1 0;min-width:0;min-height:var(--dock-min,32px);position:relative}
+.dock-bottom .dock-group{min-width:160px;min-height:0}
+.dock-group>.panel{flex:1 1 auto;height:100%;min-height:0;min-width:0}
+.dock-group>.panel:not(.dock-active){display:none!important}
+.dock-group.dock-compact{flex:0 0 auto!important;min-height:32px}
+.dock-group.dock-compact>.panel{flex:0 0 32px;height:32px}
+.dock-tabs{height:27px;flex:0 0 27px;display:flex;align-items:stretch;gap:1px;background:#0b1523;border:1px solid #2c405b;border-bottom:0;border-radius:5px 5px 0 0;padding:2px 3px 0;overflow-x:auto;scrollbar-width:thin}
+.dock-tabs:empty{display:none}
+.dock-tab{min-width:65px;max-width:180px;flex:0 1 auto;border:1px solid #334a68;border-bottom:0;border-radius:4px 4px 0 0;background:#162438;color:#9aabc1;padding:2px 9px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:10px;cursor:grab}
+.dock-tab.active{background:#1d3d69;border-color:#4180c5;color:#f0f6ff}
+.dock-tab:focus-visible,.dock-collapse:focus-visible{outline:2px solid #68afff;outline-offset:-2px}
+.dock-group:has(.dock-tabs:not(:empty))>.panel{border-radius:0 0 5px 5px}
+.dock-group .panel-title,.dock-group .timeline-heading,.dock-group .table-heading,.dock-group .review-dock-title{cursor:grab;user-select:none}
+.dock-group .panel-title:active,.dock-group .timeline-heading:active,.dock-group .table-heading:active,.dock-group .review-dock-title:active,.dock-tab:active{cursor:grabbing}
+.dock-group .panel-title button,.dock-group .timeline-heading button,.dock-group .table-heading button,.dock-group .review-dock-title button{cursor:pointer}
+.dock-header-actions{display:flex;align-items:center;justify-content:flex-end;gap:4px;min-width:0;margin-left:auto}
+.dock-header-actions>.timeline-tools,.dock-header-actions>.table-tools{margin-left:0}
+.dock-collapse{flex:0 0 22px;width:22px;height:22px;display:grid;place-items:center;margin-left:6px;padding:0;border:1px solid #344e6f;border-radius:3px;background:#17283e;color:#bdd3ed;font:14px/1 var(--sans)}
+.dock-collapse:hover{background:#245389;color:#fff}
+.dock-float-toggle{flex:0 0 22px;width:22px;height:22px;display:grid;place-items:center;margin-left:6px;padding:0;border:1px solid #344e6f;border-radius:3px;background:#17283e;color:#bdd3ed;font:13px/1 var(--sans)}
+.dock-float-toggle:hover{background:#245389;color:#fff}
+.dock-collapsed{display:block!important;overflow:hidden!important;padding:0!important;min-height:32px!important;height:32px!important}
+.dock-collapsed>:not(.panel-title):not(.timeline-heading):not(.table-heading):not(.review-dock-title){display:none!important}
+.dock-collapsed .panel-title,.dock-collapsed .timeline-heading,.dock-collapsed .table-heading,.dock-collapsed .review-dock-title{height:31px;border-bottom:0}
+.dock-collapsed .dock-header-actions>:not(.dock-collapse):not(.dock-float-toggle){display:none!important}
+.dock-collapsed.review-dock .review-dock-title>div:first-child{display:flex!important}
+.dock-collapsed.review-dock .review-dock-title>div:first-child span{display:none!important}
+.dock-divider{flex:0 0 6px;min-width:0;min-height:0;position:relative;z-index:4;display:grid;place-items:center;touch-action:none;background:transparent;border:0;padding:0;color:#9bc9fa}
+.dock-divider.vertical{cursor:row-resize}
+.dock-divider.horizontal{cursor:col-resize}
+.dock-divider span{opacity:0;display:grid;place-items:center;width:24px;height:18px;border:1px solid #347bc3;border-radius:4px;background:#10294a;box-shadow:0 2px 8px #0008;font-size:14px}
+.dock-divider.horizontal span{width:18px;height:24px}
+.dock-divider:hover span,.dock-divider:focus-visible span,.dock-divider.dragging span{opacity:1;background:#1768d7;color:#fff}
+.dock-zone.dock-over:empty::after{border-color:#65aafa;background:#113b6a44;color:#c2e0ff}
+.dock-group.dock-target-tab{outline:2px solid #55a6ff;outline-offset:-2px}
+.dock-group.dock-target-before::before,.dock-group.dock-target-after::after{content:"";position:absolute;z-index:8;pointer-events:none;background:#58abff;box-shadow:0 0 9px #338cf2}
+.dock-zone:not(.dock-bottom) .dock-group.dock-target-before::before{height:4px;top:0;left:0;right:0}
+.dock-zone:not(.dock-bottom) .dock-group.dock-target-after::after{height:4px;bottom:0;left:0;right:0}
+.dock-bottom .dock-group.dock-target-before::before{width:4px;left:0;top:0;bottom:0}
+.dock-bottom .dock-group.dock-target-after::after{width:4px;right:0;top:0;bottom:0}
+body.dock-dragging,body.dock-dragging *{user-select:none!important}
+.dock-enabled .grid-splitter.horizontal:not([data-resize="app-review-row"]){display:none}
+.dock-float-layer{position:absolute;inset:0;z-index:20;pointer-events:none;overflow:visible}
+.dock-float-layer.dock-zone:empty::after{display:none}
+.dock-float-layer .dock-floating{position:absolute;display:flex;flex:0 0 auto!important;min-width:280px;min-height:160px;width:500px;height:350px;pointer-events:auto;box-shadow:0 13px 35px #000b;border-radius:5px;background:#0b1422}
+.dock-float-layer .dock-floating.dock-compact{min-height:32px;height:32px!important}
+.dock-float-layer .dock-floating.dock-compact:has(.dock-tabs:not(:empty)){height:59px!important}
+.dock-float-layer .dock-floating>.panel{height:auto}
+.dock-float-layer .dock-floating .panel-title,.dock-float-layer .dock-floating .timeline-heading,.dock-float-layer .dock-floating .table-heading,.dock-float-layer .dock-floating .review-dock-title{cursor:move}
+.dock-float-layer .float-resize{position:absolute;right:1px;bottom:1px;width:17px;height:17px;z-index:4;cursor:nwse-resize;border:0;border-radius:0 0 4px 0;background:linear-gradient(135deg,transparent 47%,#75a9df 50%,transparent 53%,transparent 67%,#75a9df 70%,transparent 73%);opacity:.75}
+.dock-float-layer .dock-compact .float-resize{display:none}
+.dock-float-layer .dock-floating:focus-within{outline:1px solid #458cdf}
+.app-grid.dock-enabled.bottom-compact{grid-template-rows:minmax(390px,1fr) 44px}
+.app-grid.dock-enabled.bottom-compact [data-resize="app-review-row"]{display:none}
+.dock-enabled .dock-bottom .dock-group.dock-compact{flex:var(--dock-weight,1) 1 0!important;min-width:160px;min-height:32px;align-self:center}

@@ -1,0 +1,45 @@
+# Local configuration and credentials
+.env
+.env.*
+!.env.example
+
+# Local application state, databases, and backups
+.data/
+storage/
+*.sqlite
+*.sqlite-*
+*.sqlite3
+*.sqlite3-*
+*.db
+*.db-*
+*.log
+logs/
+
+# Python environments, caches, and test output
+.venv/
+venv/
+env/
+__pycache__/
+*.py[cod]
+*.pyd
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Frontend/tooling dependencies and generated builds
+node_modules/
+dist/
+build/
+
+# Local capture profiles, models, and generated recordings
+playwright-profile/
+models/
+videos/*
+!videos/README.md
+
+# Operating system files
+Thumbs.db
+desktop.ini
+.DS_Store

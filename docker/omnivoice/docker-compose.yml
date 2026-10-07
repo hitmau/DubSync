@@ -1,0 +1,32 @@
+name: dubsync-omnivoice
+
+services:
+  omnivoice:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8015:8000"
+    environment:
+      HF_HOME: /models
+      DUBSYNC_DATA_DIR: /data
+      OMNIVOICE_MODEL_ID: k2-fsa/OmniVoice
+      OMNIVOICE_MODEL_REVISION: ${OMNIVOICE_MODEL_REVISION:-main}
+      DUBSYNC_DEVICE: auto
+      DUBSYNC_WORKERS: "1"
+      OMP_NUM_THREADS: ${DUBSYNC_OMP_THREADS:-8}
+    volumes:
+      - ${DUBSYNC_SHARED_DATA_DIR:-../../.data}:/data
+      - ../../.data/omnivoice-model-cache:/models
+    shm_size: 4gb
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=4).read()"
+      interval: 15s
+      timeout: 5s
+      retries: 120
+      start_period: 10m

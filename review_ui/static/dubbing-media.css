@@ -1,0 +1,26 @@
+.dub-character-avatar{position:relative;overflow:hidden;flex:none}
+.dub-character-avatar.has-photo{background:#101a29}
+.dub-character-avatar img{position:absolute;inset:0;width:100%;height:100%;display:block;object-fit:cover;border-radius:inherit}
+.dub-character-detail-head{min-width:0}
+.dub-character-detail-identity{display:flex;align-items:center;gap:7px;min-width:0;overflow:hidden}
+.dub-character-detail-identity>b{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.dub-character-avatar.detail-avatar{width:30px;height:30px;font-size:10px}
+.dub-roi-reference-source{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;gap:5px;padding:5px;border:1px solid #354a63;border-radius:4px;background:#132238}
+.dub-roi-reference-source>span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#aebfd3;font-size:8px}
+.dub-roi-reference-source .button{min-height:22px;padding:2px 6px;font-size:8px}
+.event-list-panel .table-heading{min-width:0;overflow-x:auto;scrollbar-width:thin}
+.event-list-panel .table-heading h2{white-space:nowrap}
+.event-list-panel .table-tools{flex:none;white-space:nowrap}
+#sessionFilter{width:118px}
+#statusFilter{width:115px}
+#characterFilter{width:112px}
+#emotionFilter{width:92px}
+.event-list-panel .table-tools #minConfidence{width:45px}
+.event-list-panel .table-scroll table{min-width:850px}
+.event-list-panel .table-scroll th:nth-child(2),.event-list-panel .table-scroll th:nth-child(3){width:86px}
+.event-list-panel .table-scroll th:nth-child(4){width:58px}
+.event-list-panel .table-scroll th:nth-child(5){width:205px}
+.event-list-panel .table-scroll th:nth-child(6){width:122px}
+.event-list-panel .table-scroll th:nth-child(7){width:72px}
+.event-list-panel .table-scroll th:nth-child(8){width:48px}
+.event-list-panel .table-scroll th:nth-child(9){width:98px}

@@ -1,0 +1,6 @@
+﻿sequence,start_time,end_time,original_text,confidence,truncated,review_status,event_id
+1,176.233,181.167,"R.E.A.C.H. Warren, foi registrada uma hora extra adicional.",0.9956412017345428,False,pending,83dc8f1a-56a2-42bf-8c08-81ffdc826d76
+2,181.6,185.81960000000015,"WARREN Obrigado por me:lembrar pela sexta vez, R.E.A.C.H.",0.9874516725540161,False,pending,0c9fbb5e-b68e-4a1b-a49d-e6f3522afd3f
+3,186.9177000000002,191.667,R.E.A.C.H. Sua atividade cerebral estáinstável.,0.9990664124488831,False,pending,ccbb569f-f4e1-4776-8405-ecd94b3311bc
+4,191.933,194.99700000000016,WARREN Posso descansar quando morrer.,0.9993349611759186,False,pending,91d7e96c-0064-49f4-bade-a5267fde2579
+5,194.99700000000016,,WARREN anali Continue,0.9999437928199768,False,pending,f1d1a7ec-0498-458b-b4b5-19437160995f

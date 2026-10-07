@@ -1,0 +1,36 @@
+{
+  "scope": "Somente quatro crops finais completos, conferidos visualmente; inclui o nome do personagem impresso. Não representa o intervalo inteiro.",
+  "characters": 201,
+  "errors": 2,
+  "cer": 0.009950248756218905,
+  "events": [
+    {
+      "sequence": 1,
+      "reference": "R.E.A.C.H. Warren, foi registrada uma hora extra adicional.",
+      "ocr": "R.E.A.C.H. Warren, foi registrada uma hora extra adicional.",
+      "characters": 59,
+      "errors": 0
+    },
+    {
+      "sequence": 2,
+      "reference": "WARREN Obrigado por me lembrar pela sexta vez, R.E.A.C.H.",
+      "ocr": "WARREN Obrigado por me:lembrar pela sexta vez, R.E.A.C.H.",
+      "characters": 57,
+      "errors": 1
+    },
+    {
+      "sequence": 3,
+      "reference": "R.E.A.C.H. Sua atividade cerebral está instável.",
+      "ocr": "R.E.A.C.H. Sua atividade cerebral estáinstável.",
+      "characters": 48,
+      "errors": 1
+    },
+    {
+      "sequence": 4,
+      "reference": "WARREN Posso descansar quando morrer.",
+      "ocr": "WARREN Posso descansar quando morrer.",
+      "characters": 37,
+      "errors": 0
+    }
+  ]
+}

@@ -1,0 +1,16 @@
+# Dependências e custo
+
+A execução de captura e revisão usa Python 3.13 em 64 bits, FFmpeg e os pacotes fixados em `requirements.txt`. A única dependência pesada de inferência é PaddleOCR, instalada apenas no ambiente virtual deste projeto. A instalação começou com PaddlePaddle CPU 3.3.1, mas o teste de inferência reproduziu uma falha do oneDNN/PIR nesse ramo. O wheel oficial Windows x64 do PaddlePaddle CPU 3.2.2 também existe para CPython 3.13 e é o contorno upstream documentado; assim, o DubSync fixa 3.2.2 e mantém Python 3.13.
+
+| Componente | Por que foi escolhido | Custo e alternativa |
+|---|---|---|
+| PaddleOCR 3.7.0 + PaddlePaddle 3.2.2 CPU | OCR local com localização, texto e confiança sem serviços externos; 3.2.2 contorna a incompatibilidade de oneDNN/PIR observada em 3.3.1 e possui wheel para CPython 3.13 x64. | Downloads de modelos na primeira execução e uso de CPU/RAM; módulos de orientação e deswarp ficam desativados. Tesseract é alternativa menor, mas tende a exigir mais ajustes para diálogos estilizados. |
+| yt-dlp 2026.8.19 (`default`) + Node.js 22+ | Recebe a URL, resolve os formatos do YouTube e baixa apenas a faixa de vídeo de maior qualidade disponível. O extra `default` instala yt-dlp-ejs, usado para compatibilidade com os desafios atuais do YouTube; Node é o runtime JavaScript local. | yt-dlp-ejs e Node aumentam o tamanho da instalação. A alternativa manual é baixar um arquivo por fora e usar a entrada **Arquivo**, mas ela não oferece seleção automática de qualidade dentro do DubSync. |
+| OpenCV Contrib 4.10.0.84 | Leitura de frames, comparação visual, recortes e DCT para pHash; versão alinhada com a exigência do PaddleX OCR, evitando instalar dois pacotes que escrevem o mesmo módulo `cv2`. | Binário nativo; o app usa as APIs comuns do OpenCV e não abre janelas gráficas. |
+| SQLAlchemy + SQLite | Persistência e transações para revisão, junção e divisão, sem servidor separado. | Dependências pequenas; SQLite puro seria menor, mas dificultaria a manutenção das relações. |
+| FFmpeg/ffprobe + MSS | ffprobe valida que o download tem vídeo e nenhuma faixa de áudio e fornece timestamps de apresentação; FFmpeg também dá suporte aos formatos de vídeo selecionados. MSS fica disponível para a prévia do monitor. | FFmpeg já existe na máquina; MSS é pacote pequeno e portátil no Windows. A análise do YouTube usa o arquivo baixado, sem capturar a janela ou a tela. |
+| FastAPI + Uvicorn | Interface local e endpoints da revisão. | Pacotes leves comparados ao OCR e ao navegador; templates HTML evitam uma toolchain de frontend. |
+| RapidFuzz | Agrupamento de pequenas variações de OCR. | Extensão compilada pequena; alternativa: `difflib`, mais lenta em comparações repetidas. |
+
+Os pacotes Python ficam no `.venv` deste projeto; Node.js e FFmpeg/ffprobe são ferramentas externas já instaladas no sistema. A instalação de PaddlePaddle CPU usa o índice oficial do projeto, e o restante usa as versões exatas de `requirements.txt`. Banco, vídeos baixados, imagens, manifestos e modelos do PaddleOCR ficam em `.data/`, fora do Git. O download do YouTube solicita o formato `bestvideo`, não seleciona áudio e verifica com ffprobe que o arquivo final contém zero faixas de áudio.
+

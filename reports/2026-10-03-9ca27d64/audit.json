@@ -1,0 +1,112 @@
+{
+  "session": {
+    "session_id": "9ca27d64-089e-4cdd-bdf3-c0912fc23c5a",
+    "source_type": "youtube",
+    "source_uri": "https://www.youtube.com/watch?v=qPueFah9uXg&list=PL2TUrSmxPbczXGqXrhqWnzh8RGQc9MSG6",
+    "source_start": 170.0,
+    "requested_duration": 730.0,
+    "language": "pt",
+    "state": "failed",
+    "config_json": {
+      "url": "https://www.youtube.com/watch?v=qPueFah9uXg&list=PL2TUrSmxPbczXGqXrhqWnzh8RGQc9MSG6",
+      "start": 170.0,
+      "duration": 730.0,
+      "mode": "youtube",
+      "segment_duration_seconds": 60,
+      "screen_bbox": {
+        "left": 0,
+        "top": 0,
+        "width": 426,
+        "height": 240
+      },
+      "regions": [
+        {
+          "x": 0.25,
+          "y": 0.73,
+          "width": 0.5,
+          "height": 0.1,
+          "name": "Legenda REPLACED"
+        }
+      ],
+      "capture_backend": "video_canvas",
+      "target_fps": 30,
+      "video_only": true,
+      "timing_source": "requestVideoFrameCallback with player-clock fallback"
+    },
+    "error": "RuntimeError: O vídeo não avançou por 20 segundos; verifique o player do YouTube.",
+    "created_at": "2026-10-03T10:56:33.712043",
+    "completed_at": "2026-10-03T10:58:32.108483",
+    "detail": "A sessão encontrou um erro. Consulte o status para ver o motivo.",
+    "ready_for_calibration": false,
+    "progress": {},
+    "frames_captured": 1385,
+    "current_source_time": 216.15099999999998,
+    "current_segment": 1,
+    "effective_fps": 29.9926170269279,
+    "timing_quality": "request_video_frame_callback_estimate",
+    "timing_error_ms": 57.59505,
+    "current_file": "0000.mp4"
+  },
+  "segments": [
+    {
+      "file": "0000.mp4",
+      "frames": 1385,
+      "streams": [
+        {
+          "codec_name": "h264",
+          "codec_type": "video",
+          "width": 426,
+          "height": 240,
+          "duration": "46.166667",
+          "nb_read_frames": "1385"
+        }
+      ],
+      "first_source_time": 170.0667,
+      "last_source_time": 216.15099999999998,
+      "capture_wall_seconds": 46.1446895,
+      "effective_fps": 29.992617026927878,
+      "max_source_gap_ms": 92.65834999999356,
+      "source_gaps_over_200ms": 0,
+      "nonincreasing_times": 32
+    }
+  ],
+  "boundaries": [],
+  "total_manifest_frames": 1385,
+  "decoded_video_frames": 1385,
+  "first_source_time": 170.0667,
+  "last_source_time": 216.15099999999998,
+  "native_resolutions": {
+    "426x240": 600,
+    "1280x720": 785
+  },
+  "timing_quality": {
+    "request_video_frame_callback_estimate": 1385
+  },
+  "self_estimated_timing_error_p95_ms": 57.94915,
+  "audio_streams": 0,
+  "events": 0,
+  "low_confidence_events": [],
+  "truncated_events": [],
+  "invalid_event_intervals": [],
+  "duplicate_candidates": [],
+  "missing_assets": [],
+  "hash_mismatches": [],
+  "probe_failures": [],
+  "session_bytes": 4269105,
+  "code_sha256": {
+    "capture\\file_source.py": "a0fb9e9542d0eaac9325e7eada3fe40bfe0b9e382ec74ee6a415c21d7c349ea7",
+    "capture\\models.py": "c045ed38364e1c05fddb9cf6223a6f31224c742609d461fe69e3988d390fc3f7",
+    "capture\\session_manager.py": "8ce6c4672455c95dba59bbfb8a2b0aa747834267652ffeacd0e1574b9c81896e",
+    "capture\\youtube_source.py": "9ba8bb160462c49bc5508600d1c7ad46e12430f6997936848caaae64ff0b264b",
+    "capture\\__init__.py": "3729e3983f537135f6f52d3708c1ac7dc6b488ce89c549d0d61201fb76fcaf25",
+    "events\\dedup.py": "6ebc62870fc44ba767cdb88291ac995e2cb60543ede028dfac20bcfa14c88dd1",
+    "events\\normalize.py": "44bf62f0fcf3c778cc157bddd9925f1dc2e8e69cec96cec2c202afb17a3ca751",
+    "events\\processor.py": "e2901de5d5026630cb81f803a122f2c26f0abed382673ebdf9656c7e751ecf0b",
+    "events\\tracker.py": "e443f9969ab3fe118a4f71674ee690ab92e9e54b7d05bd05dcbe6696c89df8ac",
+    "events\\__init__.py": "17637be4c6445342831a215d55b515ea27b52a0bf389b300621721b0e435ebf7",
+    "ocr\\engine.py": "d0ad2ff1ddb6e84161a6f207725aeed4189eb88260a6930643fb90823932e35c",
+    "ocr\\__init__.py": "4f2ea18107feb9319741364161cae204b98e7f4225b184420193a852d27997e3",
+    "detector\\visual.py": "0af484095f32bd17dba1e36a08b83184c6b10fc45109d5eb8cd98903f6663370",
+    "detector\\__init__.py": "fbc095a1b645ef2a46148273dfe4008e0d2ec9b88339ff70868e3076b4139bf1"
+  }
+}

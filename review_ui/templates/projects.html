@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#0a101b">
+  <title>DubSync — Projetos</title>
+  <link rel="icon" type="image/svg+xml" href="/static/dubsync-icon.svg?v=20261005">
+  <link rel="stylesheet" href="/static/projects.css?v=20261005-5">
+  <script src="/static/projects.js?v=20261005-6" defer></script>
+</head>
+<body class="project-hub-body">
+  <div class="hub-ambient hub-ambient-a"></div><div class="hub-ambient hub-ambient-b"></div>
+  <header class="hub-topbar">
+    <a class="hub-brand" href="/" aria-label="DubSync, início"><img src="/static/dubsync-icon.svg" alt=""><span>DubSync</span><i>LOCAL STUDIO</i></a>
+    <div class="hub-topbar-right"><span class="hub-secure"><b></b> Seus dados ficam neste computador</span><span class="hub-avatar">H</span></div>
+  </header>
+
+  <main class="hub-shell">
+    <section class="hub-hero" aria-labelledby="hubTitle">
+      <div class="hub-hero-copy">
+        <div class="hub-eyebrow"><span class="hub-eyebrow-line"></span> SEU ESPAÇO DE PRODUÇÃO</div>
+        <h1 id="hubTitle">Cada jogo.<br><em>Uma história própria.</em></h1>
+        <p>Escolha um projeto para continuar ou crie um novo. Sessões, diálogos, personagens e vozes ficam organizados no contexto de cada jogo.</p>
+        <button id="newProjectTop" class="hub-button hub-button-primary" type="button"><span>＋</span> Novo projeto</button>
+      </div>
+      <div class="hub-hero-art" aria-hidden="true">
+        <div class="hub-orbit orbit-outer"></div><div class="hub-orbit orbit-inner"></div>
+        <div class="hub-art-core"><img src="/static/dubsync-icon.svg" alt=""><span>DS</span></div>
+        <div class="hub-art-chip chip-project"><i>◈</i><span>PROJETO<small>Contexto isolado</small></span><b>01</b></div>
+        <div class="hub-art-chip chip-audio"><i>♫</i><span>DUBLAGEM<small>Vozes por personagem</small></span><b>02</b></div>
+        <div class="hub-art-chip chip-dialog"><i>▤</i><span>DIÁLOGOS<small>Captura e revisão</small></span><b>03</b></div>
+        <div class="hub-art-caption"><span class="caption-dot"></span> UM FLUXO CLARO, DO PRIMEIRO FRAME AO TAKE FINAL</div>
+      </div>
+    </section>
+
+    <section class="hub-project-section" aria-labelledby="projectSectionTitle">
+      <div class="hub-section-heading">
+        <div><div class="hub-section-kicker">WORKSPACE</div><h2 id="projectSectionTitle">Seus projetos <span id="projectCount" class="hub-count">—</span></h2><p>Retome o trabalho de onde você parou.</p></div>
+        <div class="hub-controls">
+          <label class="hub-search"><span>⌕</span><input id="projectSearch" type="search" placeholder="Buscar jogo ou projeto…" aria-label="Buscar projeto"><kbd>⌘ K</kbd></label>
+          <label class="hub-sort-label" for="projectSort">Ordenar por</label><select id="projectSort"><option value="activity">Atividade recente</option><option value="name">Nome</option><option value="created">Criação</option><option value="progress">Progresso</option></select>
+        </div>
+      </div>
+      <div class="hub-filter-row" role="tablist" aria-label="Filtrar projetos">
+        <button class="hub-filter active" data-filter="all" type="button">Todos</button><button class="hub-filter" data-filter="active" type="button">Ativos</button><button class="hub-filter" data-filter="paused" type="button">Pausados</button><button class="hub-filter" data-filter="completed" type="button">Concluídos</button><button class="hub-filter" data-filter="archived" type="button">Arquivados</button>
+        <span id="hubLoading" class="hub-loading">Carregando projetos…</span>
+      </div>
+      <div id="projectGrid" class="project-grid" aria-live="polite"></div>
+      <div id="projectEmpty" class="hub-empty hidden"><div class="empty-emblem">◈</div><span class="hub-section-kicker">SEU PRÓXIMO CAPÍTULO COMEÇA AQUI</span><h3>Nenhum projeto por enquanto</h3><p>Crie um projeto para organizar as capturas, diálogos, personagens e vozes do seu jogo.</p><button class="hub-button hub-button-primary" type="button" data-new-project>＋ Criar meu primeiro projeto</button></div>
+      <div id="projectError" class="hub-error hidden" role="alert"></div>
+    </section>
+    <footer class="hub-footer"><span>DubSync <b>·</b> Produção local, contexto por projeto.</span><span>FASE 0 <i></i> HUB DE PROJETOS</span></footer>
+  </main>
+
+  <dialog id="projectWizard" class="project-wizard">
+    <form id="projectForm" method="dialog" novalidate>
+      <header class="wizard-header"><div><span class="wizard-eyebrow" id="wizardEyebrow">NOVO PROJETO</span><h2 id="wizardTitle">Vamos preparar seu espaço</h2></div><button class="wizard-close" type="button" id="wizardClose" aria-label="Fechar">×</button></header>
+      <div class="wizard-progress" aria-label="Etapas do projeto"><span id="wizardProgress"></span></div>
+      <div class="wizard-body">
+        <div class="wizard-step" data-step="1"><div class="wizard-step-heading"><i>01</i><div><b>Identidade</b><small>Como vamos chamar este projeto?</small></div></div><div class="wizard-identity-layout"><div class="wizard-identity-fields"><label class="wizard-field">Nome do projeto <sup>*</sup><input name="name" required maxlength="160" placeholder="Ex.: REPLACED"></label><label class="wizard-field">Título do jogo <sup>*</sup><input name="game_title" required maxlength="160" placeholder="Nome exibido do jogo"></label><label class="wizard-field">Slug do projeto <span>IDENTIFICADOR ÚNICO</span><input name="slug" required maxlength="96" pattern="[a-z0-9][a-z0-9-]*" placeholder="gerado-automaticamente"></label><p class="wizard-hint">O slug mantém os arquivos de cada jogo separados.</p></div><section class="wizard-cover-field" aria-label="Capa do projeto"><div class="wizard-cover-heading"><b>Capa do projeto</b><small>Preenche o card inteiro na Intro</small></div><div class="cover-picker-row"><button type="button" id="coverPicker" class="cover-picker"><span id="coverPreview"><i>＋</i></span><b>Escolher ou substituir capa</b><small>PNG, JPG ou WebP · até 8 MB</small></button><input id="coverFile" type="file" accept="image/png,image/jpeg,image/webp" hidden></div></section></div></div>
+        <div class="wizard-step hidden" data-step="2"><div class="wizard-step-heading"><i>02</i><div><b>Jogo e versão</b><small>Conte um pouco sobre o build que será catalogado.</small></div></div><div class="wizard-field-grid"><label class="wizard-field">Versão / build<input name="game_version" maxlength="80" placeholder="Ex.: 1.0.4"></label><label class="wizard-field">Plataforma<input name="platform" maxlength="80" placeholder="PC, PlayStation 5…"></label></div><fieldset class="wizard-choice"><legend>Estrutura narrativa</legend><label><input type="radio" name="narrative_type" value="linear"><span><b>Linear</b><small>Uma sequência principal de cenas</small></span></label><label><input type="radio" name="narrative_type" value="branching"><span><b>Com escolhas</b><small>Rotas e caminhos alternativos</small></span></label><label><input type="radio" name="narrative_type" value="unknown" checked><span><b>A definir</b><small>Você pode mudar isso depois</small></span></label></fieldset></div>
+        <div class="wizard-step hidden" data-step="3"><div class="wizard-step-heading"><i>03</i><div><b>Idiomas</b><small>Origem, captura e dublagem são informações distintas.</small></div></div><label class="wizard-field">Idioma original do jogo<input name="original_language" maxlength="16" value="en" placeholder="en"></label><label class="wizard-field">Idioma da legenda usada na captura<input name="capture_language" maxlength="16" value="en" placeholder="en"><small>Usado para interpretar e registrar as falas detectadas.</small></label><label class="wizard-field">Idioma da dublagem<input name="dub_language" maxlength="16" value="pt-BR" placeholder="pt-BR"></label><p class="wizard-hint">Use códigos como <code>en</code>, <code>pt-BR</code> ou <code>es-MX</code>.</p></div>
+        <div class="wizard-step hidden" data-step="4"><div class="wizard-step-heading"><i>04</i><div><b>Fonte inicial <span class="wizard-optional">OPCIONAL</span></b><small>Você pode configurar a captura depois.</small></div></div><div class="source-choice-grid"><button class="source-choice active" type="button" data-source="later"><i>⌁</i><b>Agora não</b><small>Escolher a fonte dentro do projeto</small></button><button class="source-choice" type="button" data-source="youtube"><i>▷</i><b>YouTube</b><small>Deixar uma URL preparada</small></button><button class="source-choice" type="button" data-source="file"><i>▣</i><b>Arquivo local</b><small>Deixar o caminho preparado</small></button></div><label id="sourceUrlField" class="wizard-field hidden">URL do YouTube<input name="source_url" type="url" placeholder="https://youtube.com/watch?v=…"></label><label id="sourceFileField" class="wizard-field hidden">Caminho do vídeo<input name="source_path" placeholder="C:\\Videos\\jogo.mp4"></label></div>
+        <div class="wizard-step hidden" data-step="5"><div class="wizard-step-heading"><i>05</i><div><b>Notas complementares <span class="wizard-optional">OPCIONAL</span></b><small>Registre observações sobre o projeto, a versão ou a produção.</small></div></div><label class="wizard-field">Notas<textarea name="notes" rows="5" maxlength="8000" placeholder="Anotações sobre o projeto, a versão ou a produção…"></textarea></label></div>
+        <div class="wizard-step hidden" data-step="6"><div class="wizard-step-heading"><i>✓</i><div><b>Confira seu projeto</b><small>Este será o contexto que organiza o trabalho do jogo.</small></div></div><div id="projectReview" class="project-review"></div><label class="wizard-consent"><input id="openAfterCreate" type="checkbox" checked><span><b>Abrir projeto após criar</b><small>Você pode voltar ao Hub a qualquer momento.</small></span></label></div>
+        <p id="wizardError" class="wizard-error hidden" role="alert"></p>
+      </div>
+      <footer class="wizard-footer"><button id="wizardBack" class="hub-button hub-button-quiet" type="button">Cancelar</button><span id="wizardStepLabel">ETAPA 1 DE 6</span><button id="wizardNext" class="hub-button hub-button-primary" type="button">Continuar <span>→</span></button><button id="wizardSubmit" class="hub-button hub-button-primary hidden" type="submit">Criar projeto <span>→</span></button></footer>
+    </form>
+  </dialog>
+  <dialog id="projectToastDialog" class="project-toast-dialog"><div class="project-toast-icon">✓</div><h3>Projeto pronto</h3><p id="projectToastMessage">O espaço do jogo foi criado e está preparado.</p><button id="projectToastClose" class="hub-button hub-button-primary" type="button">Continuar</button></dialog>
+</body>
+</html>

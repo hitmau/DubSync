@@ -1,0 +1,121 @@
+/* Layout recursivo e compacto dos cards da tela de Dublagem. */
+.dubbing-view{grid-template-rows:minmax(0,1fr) 19px}
+
+#dubGrid.dock-enabled{position:relative;display:grid;grid-template-columns:minmax(0,1fr);grid-template-rows:minmax(0,1fr);gap:0;min-width:0;min-height:0;overflow:hidden}
+#dubGrid.dock-enabled>#dubDockRoot{grid-column:1;grid-row:1;min-width:0;min-height:0}
+#dubGrid.dock-enabled>.dub-dock-zone:not(.dock-float-layer),#dubGrid.dock-enabled>.dub-column-divider,#dubGrid.dock-enabled>.dub-row-divider{display:none!important}
+#dubDockRoot{position:relative;display:flex;flex-direction:column;width:100%;height:100%;min-width:0;min-height:0;overflow:hidden}
+#dubDockRoot.dock-root-empty::after{content:"Arraste um card para cá para começar o layout";display:grid;place-items:center;flex:1;min-width:240px;min-height:120px;border:1px dashed #3a5d85;border-radius:5px;color:#879bb6;font-size:11px}
+#dubDockRoot>.dub-dock-surface{position:relative;display:flex;flex:1 1 0;width:100%;min-width:0;min-height:0;overflow:hidden}
+#dubDockRoot>.dub-dock-surface>.dock-group,#dubDockRoot>.dub-dock-surface>.dock-split{flex:1 1 0;width:100%;height:100%;min-width:0;min-height:0}
+.dock-split{display:flex;flex:1 1 0;min-width:0;min-height:0;overflow:hidden}
+.dock-split-x{flex-direction:row}
+.dock-split-y{flex-direction:column}
+.dock-cell{display:flex;flex:1 1 0;min-width:0;min-height:0;overflow:hidden}
+.dock-cell>.dock-group{flex:1 1 0!important;width:100%;height:100%;min-width:0;min-height:0}
+#dubGrid.dock-enabled .dock-group{position:relative;min-width:0;min-height:0}
+#dubGrid.dock-enabled .dock-group>.panel{flex:1 1 auto;width:100%;height:100%;min-width:0!important;min-height:0!important;overflow:hidden}
+#dubGrid.dock-enabled .dock-group>.panel>.panel-title,#dubGrid.dock-enabled .dock-group>.panel>.dub-panel-heading{flex:0 0 auto}
+.dock-split>.dock-divider{z-index:6;flex:0 0 8px;min-width:8px;min-height:8px;padding:0;background:linear-gradient(90deg,transparent calc(50% - .5px),#263c57 calc(50% - .5px),#263c57 calc(50% + .5px),transparent calc(50% + .5px));touch-action:none}
+.dock-split-x>.dock-divider{width:8px;height:auto;cursor:col-resize}
+.dock-split-y>.dock-divider{width:auto;height:8px;cursor:row-resize;background:linear-gradient(180deg,transparent calc(50% - .5px),#263c57 calc(50% - .5px),#263c57 calc(50% + .5px),transparent calc(50% + .5px))}
+.dock-split>.dock-divider:hover,.dock-split>.dock-divider:focus-visible,.dock-split>.dock-divider.dragging{background-color:#173b65}
+.dock-split-x>.dock-divider:hover,.dock-split-x>.dock-divider:focus-visible,.dock-split-x>.dock-divider.dragging{background:linear-gradient(90deg,transparent calc(50% - 1px),#438de0 calc(50% - 1px),#438de0 calc(50% + 1px),transparent calc(50% + 1px))}
+.dock-split-y>.dock-divider:hover,.dock-split-y>.dock-divider:focus-visible,.dock-split-y>.dock-divider.dragging{background:linear-gradient(180deg,transparent calc(50% - 1px),#438de0 calc(50% - 1px),#438de0 calc(50% + 1px),transparent calc(50% + 1px))}
+.dock-split>.dock-divider span{opacity:0}
+.dock-split>.dock-divider:hover span,.dock-split>.dock-divider:focus-visible span,.dock-split>.dock-divider.dragging span{opacity:1}
+.dock-group>.panel-title,.dock-group>.panel>.panel-title,.dock-group>.panel>.dub-panel-heading{cursor:grab;user-select:none}
+.dock-group>.panel-title:active,.dock-group>.panel>.panel-title:active,.dock-group>.panel>.dub-panel-heading:active{cursor:grabbing}
+.dock-group.dock-target-tab{outline:2px solid #6bafff;outline-offset:-3px}
+.dock-group.dock-target-left,.dock-group.dock-target-right,.dock-group.dock-target-top,.dock-group.dock-target-bottom{outline:2px solid #4298f6;outline-offset:-3px}
+.dock-group.dock-target-left::before,.dock-group.dock-target-right::before,.dock-group.dock-target-top::before,.dock-group.dock-target-bottom::before{position:absolute;z-index:12;display:grid;place-items:center;border:1px solid #66b4ff;border-radius:4px;background:#1463ba99;color:#fff;font:700 12px var(--sans);pointer-events:none;content:""}
+.dock-group.dock-target-left::before{content:"←";inset:4px auto 4px 4px;width:28%}
+.dock-group.dock-target-right::before{content:"→";inset:4px 4px 4px auto;width:28%}
+.dock-group.dock-target-top::before{content:"↑";inset:4px 4px auto;height:28%}
+.dock-group.dock-target-bottom::before{content:"↓";inset:auto 4px 4px;height:28%}
+.dock-group.dock-target-tab::after{position:absolute;z-index:12;inset:28%;display:grid;place-items:center;border:1px solid #9dcaff;border-radius:5px;background:#102b4ecc;color:#d9edff;font-size:9px;pointer-events:none;content:"Criar aba"}
+#dubGrid .dock-float-layer{position:absolute;inset:0;z-index:20;overflow:visible;pointer-events:none}
+#dubGrid .dock-float-layer:empty::after{display:none}
+#dubGrid .dock-float-layer .dock-floating{position:absolute;display:flex;flex:0 0 auto!important;width:500px;height:350px;min-width:280px;min-height:160px;border-radius:5px;background:#0b1422;box-shadow:0 13px 35px #000b;pointer-events:auto}
+#dubGrid .dock-float-layer .dock-floating>.panel{height:auto}
+#dubGrid .dock-float-layer .dock-floating.dock-compact{height:32px!important;min-height:32px}
+#dubGrid .dock-float-layer .dock-floating.dock-compact:has(.dock-tabs:not(:empty)){height:59px!important}
+#dubGrid .dock-float-layer .float-resize{position:absolute;right:1px;bottom:1px;width:17px;height:17px;z-index:14;cursor:nwse-resize;border:0;border-radius:0 0 4px 0;background:linear-gradient(135deg,transparent 47%,#75a9df 50%,transparent 53%,transparent 67%,#75a9df 70%,transparent 73%);opacity:.8}
+#dubGrid .dock-float-layer .dock-floating:focus-within{outline:1px solid #458cdf}
+#dubGrid .dock-collapsed>:not(.panel-title):not(.dub-panel-heading){display:none!important}
+#dubGrid .dock-collapsed .panel-title,#dubGrid .dock-collapsed .dub-panel-heading{height:31px;border-bottom:0}
+#dubGrid .dock-collapsed .dub-panel-heading>div:first-child{display:flex!important}
+#dubGrid .dock-collapsed .dock-header-actions>:not(.dock-collapse):not(.dock-float-toggle){display:none!important}
+#dubGrid .dock-floating .panel-title,#dubGrid .dock-floating .dub-panel-heading{cursor:move}
+#dubGrid .dock-floating .panel-title button,#dubGrid .dock-floating .dub-panel-heading button{cursor:pointer}
+
+/* Cards recolhidos permanecem no próprio encaixe; o painel vizinho ocupa o espaço liberado. */
+#dubGrid .dock-group.dock-all-collapsed>.dock-tabs{display:none}
+#dubGrid .dock-divider:disabled{cursor:default;opacity:.35}
+#dubGrid .dock-tabs .dock-tab-minimized{border-style:dashed;color:#8399b4;background:#111b2a}
+#dubGrid .dock-collapsed.dock-collapse-vertical{
+  width:34px!important;
+  min-width:34px!important;
+  max-width:34px!important;
+  height:auto!important;
+  min-height:0!important;
+  align-self:stretch;
+  padding:0!important;
+}
+#dubGrid.dock-enabled .dock-group>.panel.dock-collapsed.dock-collapse-vertical{
+  width:34px!important;
+  min-width:34px!important;
+  max-width:34px!important;
+  height:100%!important;
+  min-height:0!important;
+  max-height:none!important;
+}
+#dubGrid .dock-collapsed.dock-collapse-vertical>.panel-title,
+#dubGrid .dock-collapsed.dock-collapse-vertical>.dub-panel-heading{
+  position:relative;
+  display:block!important;
+  width:34px;
+  height:100%!important;
+  min-height:0!important;
+  padding:0!important;
+  border-right:1px solid #344a67;
+  border-bottom:0!important;
+}
+#dubGrid .dock-collapsed.dock-collapse-vertical .panel-title h2,
+#dubGrid .dock-collapsed.dock-collapse-vertical .dub-panel-heading h2{
+  position:absolute;
+  top:50%;
+  left:50%;
+  width:max-content;
+  max-width:calc(100vh - 100px);
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap;
+  transform:translate(-50%,-50%) rotate(-90deg);
+  transform-origin:center;
+  font-size:9px;
+}
+#dubGrid .dock-collapsed.dock-collapse-vertical .dub-icon,
+#dubGrid .dock-collapsed.dock-collapse-vertical .panel-kicker{display:none!important}
+#dubGrid .dock-collapsed.dock-collapse-vertical .dock-header-actions{
+  position:absolute;
+  right:0;
+  bottom:3px;
+  left:0;
+  display:flex;
+  flex-direction:column;
+  align-items:center;
+  gap:2px;
+  margin:0;
+}
+#dubGrid .dock-collapsed.dock-collapse-vertical .dock-float-toggle{display:none!important}
+#dubGrid .dock-collapsed.dock-collapse-vertical .dock-collapse{
+  flex:0 0 20px;
+  width:20px;
+  height:20px;
+  margin:0;
+  font-size:12px;
+}
+
+@media(max-height:760px){.dubbing-view{grid-template-rows:minmax(0,1fr) 17px}}
+@media(prefers-reduced-motion:reduce){.dock-split>.dock-divider{scroll-behavior:auto}}

@@ -1,0 +1,1152 @@
+[
+  {
+    "event_id": "83dc8f1a-56a2-42bf-8c08-81ffdc826d76",
+    "session_id": "f88089d6-53ca-4b0c-a179-215759bc2280",
+    "sequence": 1,
+    "segment_id": "youtube-0000",
+    "start_time": 176.233,
+    "end_time": 181.167,
+    "original_text": "R.E.A.C.H. Warren, foi registrada uma hora extra adicional.",
+    "ocr_observations_json": [
+      {
+        "source_time": 176.233,
+        "text": "R.E.A.C.H. Warr",
+        "confidence": 0.9996395707130432,
+        "bbox": [
+          385,
+          529,
+          308,
+          63
+        ]
+      },
+      {
+        "source_time": 176.383,
+        "text": "R.E.A.C.H. fo Warren,",
+        "confidence": 0.9969273408253988,
+        "bbox": [
+          385,
+          529,
+          308,
+          63
+        ]
+      },
+      {
+        "source_time": 176.517,
+        "text": "R.E.A.C.H. reg Warren, foi",
+        "confidence": 0.997141644358635,
+        "bbox": [
+          385,
+          529,
+          307,
+          66
+        ]
+      },
+      {
+        "source_time": 176.667,
+        "text": "R.E.A.C.H. Warren, foi reqistrad",
+        "confidence": 0.9894559383392334,
+        "bbox": [
+          386,
+          529,
+          307,
+          63
+        ]
+      },
+      {
+        "source_time": 176.80010000000001,
+        "text": "R.E.A.C.H. Warren, foi registrada uma",
+        "confidence": 0.9940735995769501,
+        "bbox": [
+          385,
+          529,
+          308,
+          65
+        ]
+      },
+      {
+        "source_time": 176.967,
+        "text": "R.E.A.C.H. Warren, foi registrada uma hora e",
+        "confidence": 0.9970312118530273,
+        "bbox": [
+          385,
+          532,
+          355,
+          62
+        ]
+      },
+      {
+        "source_time": 177.117,
+        "text": "R.E.A.C.H. Warren, foi registrada uma hora extra a",
+        "confidence": 0.9993706941604614,
+        "bbox": [
+          384,
+          532,
+          424,
+          63
+        ]
+      },
+      {
+        "source_time": 177.267,
+        "text": "R.E.A.C.H. Warren, foi registrada uma hora extra adicion",
+        "confidence": 0.9949784278869629,
+        "bbox": [
+          384,
+          532,
+          484,
+          63
+        ]
+      },
+      {
+        "source_time": 178.567,
+        "text": "R.E.A.C.H. Warren, foi registrada uma hora extra adicional.",
+        "confidence": 0.9960736930370331,
+        "bbox": [
+          384,
+          532,
+          509,
+          63
+        ]
+      },
+      {
+        "source_time": 179.967,
+        "text": "R.E.A.C.H. Warren, foi registrada uma hora extra adicional.",
+        "confidence": 0.9956412017345428,
+        "bbox": [
+          384,
+          532,
+          509,
+          63
+        ]
+      }
+    ],
+    "normalized_text": "r e a c h warren foi registrada uma hora extra adicional",
+    "corrected_text": null,
+    "confidence": 0.9956412017345428,
+    "bbox_json": [
+      384,
+      532,
+      509,
+      63
+    ],
+    "crop_path": "images/917506a7-6bd1-456d-a649-7d7779b2a4fc_dialogue_final_original.png",
+    "start_frame_path": "images/917506a7-6bd1-456d-a649-7d7779b2a4fc_start_original.png",
+    "before_frame_path": "images/917506a7-6bd1-456d-a649-7d7779b2a4fc_pre_250_original.png",
+    "best_frame_path": "images/917506a7-6bd1-456d-a649-7d7779b2a4fc_best_final_original.png",
+    "end_frame_path": "images/917506a7-6bd1-456d-a649-7d7779b2a4fc_end_original.png",
+    "assets_json": [
+      {
+        "kind": "pre_1000",
+        "path": "images/917506a7-6bd1-456d-a649-7d7779b2a4fc_pre_1000_original.png",
+        "source_time": 175.23390000000015,
+        "offset_ms": -999,
+        "captured_at": "2026-10-03T11:08:24.491136+00:00",
+        "segment_id": "youtube-0000",
+        "frame_id": 153,
+        "timing_quality": "request_video_frame_callback_estimate",
+        "timing_error_ms": 59.75975,
+        "image_role": "original_full_frame",
+        "sha256": "3ef31ee2425e710d41ea1324e61f1ae582c17c203a638240e4a78aa4d2abd608"
+      },
+      {
+        "kind": "pre_500",
+        "path": "images/917506a7-6bd1-456d-a649-7d7779b2a4fc_pre_500_original.png",
+        "source_time": 175.733,
+        "offset_ms": -500,
+        "captured_at": "2026-10-03T11:08:24.985475+00:00",
+        "segment_id": "youtube-0000",
+        "frame_id": 163,
+        "timing_quality": "request_video_frame_callback_estimate",
+        "timing_error_ms": 65.63974999999999,
+        "image_role": "original_full_frame",
+        "sha256": "7159b0658327e3624ca5c1cc520b8eefc1e96ee86188f116e31403a71525a1f2"
+      },
+      {
+        "kind": "pre_250",
+        "path": "images/917506a7-6bd1-456d-a649-7d7779b2a4fc_pre_250_original.png",
+        "source_time": 176.0,
+        "offset_ms": -233,
+        "captured_at": "2026-10-03T11:08:25.252899+00:00",
+        "segment_id": "youtube-0000",
+        "frame_id": 169,
+        "timing_quality": "request_video_frame_callback_estimate",
+        "timing_error_ms": 61.0589,
+        "image_role": "original_full_frame",
+        "sha256": "279d5988aac07b6f8c6d16a49df41c346622986856f07df4eaa249975dfba5f7"
+      },
+      {
+        "kind": "start",
+        "path": "images/917506a7-6bd1-456d-a649-7d7779b2a4fc_start_original.png",
+        "source_time": 176.233,
+        "offset_ms": 0,
+        "captured_at": "2026-10-03T11:08:25.486235+00:00",
+        "segment_id": "youtube-0000",
+        "frame_id": 174,
+        "timing_quality": "request_video_frame_callback_estimate",
+        "timing_error_ms": 66.77584999999999,
+        "image_role": "original_full_frame",
+        "sha256": "0640254a8c964ae128f8011d19d7802c2f976e29965800184d0fde6f87f38a9d"
+      },
+      {
+        "kind": "crop_at_activation",
+        "path": "images/917506a7-6bd1-456d-a649-7d7779b2a4fc_dialogue_original.png",
+        "image_role": "original_crop",
+        "source_time": 176.233
+      },
+      {
+        "kind": "best_at_activation",
+        "path": "images/917506a7-6bd1-456d-a649-7d7779b2a4fc_best_original.png",
+        "source_time": 176.517,
+        "offset_ms": 284,
+        "captured_at": "2026-10-03T11:08:25.769606+00:00",
+        "segment_id": "youtube-0000",
+        "frame_id": 180,
+        "timing_quality": "request_video_frame_callback_estimate",
+        "timing_error_ms": 64.2714,
+        "image_role": "original_full_frame",
+        "sha256": "1bb85b2894b1e09a8febfbceb3624e22b309c1fcde3d97faef46daa5dbfaeee9"
+      },
+      {
+        "kind": "best",
+        "path": "images/917506a7-6bd1-456d-a649-7d7779b2a4fc_best_final_original.png",
+        "source_time": 177.117,
+        "offset_ms": 884,
+        "captured_at": "2026-10-03T11:08:26.369693+00:00",
+        "segment_id": "youtube-0000",
+        "frame_id": 193,
+        "timing_quality": "request_video_frame_callback_estimate",
+        "timing_error_ms": 61.97175,
+        "image_role": "original_full_frame",
+        "sha256": "879292ce4254709cde6689cbb2dd39e1ec72453f9e640bdc494b3d5cebd17788"
+      },
+      {
+        "kind": "end",
+        "path": "images/917506a7-6bd1-456d-a649-7d7779b2a4fc_end_original.png",
+        "source_time": 181.167,
+        "offset_ms": 4934,
+        "captured_at": "2026-10-03T11:08:30.419415+00:00",
+        "segment_id": "youtube-0000",
+        "frame_id": 288,
+        "timing_quality": "request_video_frame_callback_estimate",
+        "timing_error_ms": 65.34745,
+        "image_role": "original_full_frame",
+        "sha256": "439039cf97b56a3ad8f8273300dbf9a33ab23681614e6735eb3e9ebd3eb265ae"
+      },
+      {
+        "kind": "post_250",
+        "path": "images/917506a7-6bd1-456d-a649-7d7779b2a4fc_post_250_original.png",
+        "source_time": 181.417,
+        "offset_ms": 5184,
+        "captured_at": "2026-10-03T11:08:30.667402+00:00",
+        "segment_id": "youtube-0000",
+        "frame_id": 293,
+        "timing_quality": "request_video_frame_callback_estimate",
+        "timing_error_ms": 61.00775,
+        "image_role": "original_full_frame",
+        "sha256": "66fd937e4383d88f936e886ab114783e709f3e8c9d988db3637e9e0d7589c8ed"
+      }
+    ],
+    "processing_variants_json": [],
+    "text_phash": "8d58af7222f7209d",
+    "context_phash": "c8f0f0f0f1733236",
+    "character": null,
+    "emotion": null,
+    "review_status": "pending",
+    "truncated": false,
+    "timing_quality": "request_video_frame_callback_estimate",
+    "timing_error_ms": 66.77584999999999,
+    "captured_at": "2026-10-03T11:08:25.486235+00:00",
+    "frame_id": 174,
+    "merged_into": null,
+    "created_at": "2026-10-03T11:08:52.552915",
+    "updated_at": "2026-10-03T11:08:55.720023"
+  },
+  {
+    "event_id": "0c9fbb5e-b68e-4a1b-a49d-e6f3522afd3f",
+    "session_id": "f88089d6-53ca-4b0c-a179-215759bc2280",
+    "sequence": 2,
+    "segment_id": "youtube-0000",
+    "start_time": 181.6,
+    "end_time": 185.81960000000015,
+    "original_text": "WARREN Obrigado por me:lembrar pela sexta vez, R.E.A.C.H.",
+    "ocr_observations_json": [
+      {
+        "source_time": 181.6,
+        "text": "WARREN Obriga",
+        "confidence": 0.9991073310375214,
+        "bbox": [
+          379,
+          533,
+          302,
+          63
+        ]
+      },
+      {
+        "source_time": 181.75,
+        "text": "WARREN Obrigado por",
+        "confidence": 0.9997318784395853,
+        "bbox": [
+          380,
+          533,
+          301,
+          63
+        ]
+      },
+      {
+        "source_time": 181.9,
+        "text": "WARREN Obrigado por me le",
+        "confidence": 0.9963250309228897,
+        "bbox": [
+          381,
+          533,
+          301,
+          62
+        ]
+      },
+      {
+        "source_time": 182.05,
+        "text": "WARREN Obrigado por me lembrar",
+        "confidence": 0.9995212554931641,
+        "bbox": [
+          380,
+          533,
+          302,
+          63
+        ]
+      },
+      {
+        "source_time": 182.2,
+        "text": "WARREN Obrigado por me lembrar pela S",
+        "confidence": 0.8978763222694397,
+        "bbox": [
+          380,
+          533,
+          322,
+          63
+        ]
+      },
+      {
+        "source_time": 182.35,
+        "text": "WARREN Obrigado por me lembrar pela sexta v",
+        "confidence": 0.9992696344852448,
+        "bbox": [
+          379,
+          533,
+          393,
+          64
+        ]
+      },
+      {
+        "source_time": 182.5,
+        "text": "WARREN Obrigado por me lembrar pela sexta vez, R.",
+        "confidence": 0.997989147901535,
+        "bbox": [
+          380,
+          533,
+          447,
+          62
+        ]
+      },
+      {
+        "source_time": 182.65830000000008,
+        "text": "WARREN Obrigado por me lembrar pela sexta vez, R.E.A.C.",
+        "confidence": 0.9988937675952911,
+        "bbox": [
+          380,
+          530,
+          500,
+          65
+        ]
+      },
+      {
+        "source_time": 184.033,
+        "text": "WARREN Obrigado por me:lembrar pela sexta vez, R.E.A.C.H.",
+        "confidence": 0.990988701581955,
+        "bbox": [
+          379,
+          533,
+          519,
+          63
+        ]
+      },
+      {
+        "source_time": 185.3961000000002,
+        "text": "WARREN Obrigado por me:lembrar pela sexta vez, R.E.A.C.H.",
+        "confidence": 0.9874516725540161,
+        "bbox": [
+          380,
+          533,
+          517,
+          62
+        ]
+      }
+    ],
+    "normalized_text": "warren obrigado por me lembrar pela sexta vez r e a c h",
+    "corrected_text": null,
+    "confidence": 0.9874516725540161,
+    "bbox_json": [
+      380,
+      533,
+      517,
+      62
+    ],
+    "crop_path": "images/d9d66279-283b-4bd5-8c75-18c66d479d6b_dialogue_final_original.png",
+    "start_frame_path": "images/d9d66279-283b-4bd5-8c75-18c66d479d6b_start_original.png",
+    "before_frame_path": "images/d9d66279-283b-4bd5-8c75-18c66d479d6b_pre_250_original.png",
+    "best_frame_path": "images/d9d66279-283b-4bd5-8c75-18c66d479d6b_best_final_original.png",
+    "end_frame_path": "images/d9d66279-283b-4bd5-8c75-18c66d479d6b_end_original.png",
+    "assets_json": [
+      {
+        "kind": "pre_1000",
+        "path": "images/d9d66279-283b-4bd5-8c75-18c66d479d6b_pre_1000_original.png",
+        "source_time": 180.617,
+        "offset_ms": -983,
+        "captured_at": "2026-10-03T11:08:29.873865+00:00",
+        "segment_id": "youtube-0000",
+        "frame_id": 277,
+        "timing_quality": "request_video_frame_callback_estimate",
+        "timing_error_ms": 66.35125,
+        "image_role": "original_full_frame",
+        "sha256": "16df57f7cfdc7a3ff7a226c41cee2c0b6d12722f5b954602b3d6c50bab4bf8a7"
+      },
+      {
+        "kind": "pre_500",
+        "path": "images/d9d66279-283b-4bd5-8c75-18c66d479d6b_pre_500_original.png",
+        "source_time": 181.10310000000013,
+        "offset_ms": -497,
+        "captured_at": "2026-10-03T11:08:30.370277+00:00",
+        "segment_id": "youtube-0000",
+        "frame_id": 287,
+        "timing_quality": "request_video_frame_callback_estimate",
+        "timing_error_ms": 65.4724,
+        "image_role": "original_full_frame",
+        "sha256": "e020dee3b99b41792ad0d2b799f0b202331009b7297edea68dc502b8e37e425a"
+      },
+      {
+        "kind": "pre_250",
+        "path": "images/d9d66279-283b-4bd5-8c75-18c66d479d6b_pre_250_original.png",
+        "source_time": 181.367,
+        "offset_ms": -233,
+        "captured_at": "2026-10-03T11:08:30.619056+00:00",
+        "segment_id": "youtube-0000",
+        "frame_id": 292,
+        "timing_quality": "request_video_frame_callback_estimate",
+        "timing_error_ms": 66.17699999999999,
+        "image_role": "original_full_frame",
+        "sha256": "6bf5a13b13e057681636f4da16f6fc080200df99ca0f81c8f2bfe98d72f141f2"
+      },
+      {
+        "kind": "start",
+        "path": "images/d9d66279-283b-4bd5-8c75-18c66d479d6b_start_original.png",
+        "source_time": 181.6,
+        "offset_ms": 0,
+        "captured_at": "2026-10-03T11:08:30.853630+00:00",
+        "segment_id": "youtube-0000",
+        "frame_id": 297,
+        "timing_quality": "request_video_frame_callback_estimate",
+        "timing_error_ms": 59.8683,
+        "image_role": "original_full_frame",
+        "sha256": "190002393c941b818cbd0ec7a1c8edb979025fc6f21f3c6e3b96872e092cb393"
+      },
+      {
+        "kind": "crop_at_activation",
+        "path": "images/d9d66279-283b-4bd5-8c75-18c66d479d6b_dialogue_original.png",
+        "image_role": "original_crop",
+        "source_time": 181.6
+      },
+      {
+        "kind": "best_at_activation",
+        "path": "images/d9d66279-283b-4bd5-8c75-18c66d479d6b_best_original.png",
+        "source_time": 181.9,
+        "offset_ms": 300,
+        "captured_at": "2026-10-03T11:08:31.154425+00:00",
+        "segment_id": "youtube-0000",
+        "frame_id": 303,
+        "timing_quality": "request_video_frame_callback_estimate",
+        "timing_error_ms": 66.04495,
+        "image_role": "original_full_frame",
+        "sha256": "f476c69a41cc12a70d3fb8db033930ec471c3a72562a36ec645b6d5e466f9cc0"
+      },
+      {
+        "kind": "best",
+        "path": "images/d9d66279-283b-4bd5-8c75-18c66d479d6b_best_final_original.png",
+        "source_time": 182.05,
+        "offset_ms": 450,
+        "captured_at": "2026-10-03T11:08:31.307001+00:00",
+        "segment_id": "youtube-0000",
+        "frame_id": 306,
+        "timing_quality": "request_video_frame_callback_estimate",
+        "timing_error_ms": 65.51955,
+        "image_role": "original_full_frame",
+        "sha256": "25b5f0d1329c552b391c06ed829b3035da17e380fa3587c0c7cf62ff3d596b2d"
+      },
+      {
+        "kind": "end",
+        "path": "images/d9d66279-283b-4bd5-8c75-18c66d479d6b_end_original.png",
+        "source_time": 185.81960000000015,
+        "offset_ms": 4220,
+        "captured_at": "2026-10-03T11:08:35.071745+00:00",
+        "segment_id": "youtube-0000",
+        "frame_id": 398,
+        "timing_quality": "request_video_frame_callback_estimate",
+        "timing_error_ms": 57.9395,
+        "image_role": "original_full_frame",
+        "sha256": "51447830296465da4733929585fbe610a3156ff8c72b1a88f551a7a0fd4a1fbe"
+      },
+      {
+        "kind": "post_250",
+        "path": "images/d9d66279-283b-4bd5-8c75-18c66d479d6b_post_250_original.png",
+        "source_time": 186.06360000000015,
+        "offset_ms": 4464,
+        "captured_at": "2026-10-03T11:08:35.305832+00:00",
+        "segment_id": "youtube-0000",
+        "frame_id": 405,
+        "timing_quality": "request_video_frame_callback_estimate",
+        "timing_error_ms": 52.8707,
+        "image_role": "original_full_frame",
+        "sha256": "d48271b67df446711d0109ed990d69119e19073d2725a60cd5530c90a7f6e984"
+      }
+    ],
+    "processing_variants_json": [],
+    "text_phash": "dc09f82f10e723d6",
+    "context_phash": "c8f0f0f0f2733326",
+    "character": null,
+    "emotion": null,
+    "review_status": "pending",
+    "truncated": false,
+    "timing_quality": "request_video_frame_callback_estimate",
+    "timing_error_ms": 59.8683,
+    "captured_at": "2026-10-03T11:08:30.853630+00:00",
+    "frame_id": 297,
+    "merged_into": null,
+    "created_at": "2026-10-03T11:08:56.835772",
+    "updated_at": "2026-10-03T11:09:00.059483"
+  },
+  {
+    "event_id": "ccbb569f-f4e1-4776-8405-ecd94b3311bc",
+    "session_id": "f88089d6-53ca-4b0c-a179-215759bc2280",
+    "sequence": 3,
+    "segment_id": "youtube-0000",
+    "start_time": 186.9177000000002,
+    "end_time": 191.667,
+    "original_text": "R.E.A.C.H. Sua atividade cerebral estáinstável.",
+    "ocr_observations_json": [
+      {
+        "source_time": 186.9177000000002,
+        "text": "R.E.A.C.H. S",
+        "confidence": 0.977484405040741,
+        "bbox": [
+          442,
+          529,
+          251,
+          63
+        ]
+      },
+      {
+        "source_time": 187.0500000000002,
+        "text": "R.E.A.C.H. Sua at",
+        "confidence": 0.9992051422595978,
+        "bbox": [
+          441,
+          529,
+          252,
+          65
+        ]
+      },
+      {
+        "source_time": 187.183,
+        "text": "R.E.A.C.H. Sua atividad 81",
+        "confidence": 0.8636327385902405,
+        "bbox": [
+          442,
+          529,
+          311,
+          65
+        ]
+      },
+      {
+        "source_time": 187.31730000000005,
+        "text": "R.E.A.C.H. Sua atividade cer 81",
+        "confidence": 0.8695708364248276,
+        "bbox": [
+          442,
+          532,
+          310,
+          62
+        ]
+      },
+      {
+        "source_time": 187.45,
+        "text": "R.E.A.C.H. Sua atividade cerebral 8",
+        "confidence": 0.8231843014558157,
+        "bbox": [
+          442,
+          532,
+          310,
+          62
+        ]
+      },
+      {
+        "source_time": 187.583,
+        "text": "R.E.A.C.H. Sua atividade cerebral está",
+        "confidence": 0.9990552067756653,
+        "bbox": [
+          442,
+          532,
+          296,
+          62
+        ]
+      },
+      {
+        "source_time": 187.7068,
+        "text": "R.E.A.C.H. Sua atividade cerebral estáinstá",
+        "confidence": 0.9991772174835205,
+        "bbox": [
+          441,
+          532,
+          358,
+          62
+        ]
+      },
+      {
+        "source_time": 187.85010000000005,
+        "text": "R.E.A.C.H. Sua atividade cerebral está instável.",
+        "confidence": 0.992050975561142,
+        "bbox": [
+          442,
+          532,
+          392,
+          62
+        ]
+      },
+      {
+        "source_time": 189.183,
+        "text": "R.E.A.C.H. Sua atividade cerebral estáinstável.",
+        "confidence": 0.999179869890213,
+        "bbox": [
+          441,
+          532,
+          393,
+          62
+        ]
+      },
+      {
+        "source_time": 190.5170000000002,
+        "text": "R.E.A.C.H. Sua atividade cerebral estáinstável.",
+        "confidence": 0.9990664124488831,
+        "bbox": [
+          441,
+          532,
+          393,
+          62
+        ]
+      }
+    ],
+    "normalized_text": "r e a c h sua atividade cerebral estáinstável",
+    "corrected_text": null,
+    "confidence": 0.9990664124488831,
+    "bbox_json": [
+      441,
+      532,
+      393,
+      62
+    ],
+    "crop_path": "images/cf27c5d1-f278-4cf6-a572-6da0d99c8cf9_dialogue_final_original.png",
+    "start_frame_path": "images/cf27c5d1-f278-4cf6-a572-6da0d99c8cf9_start_original.png",
+    "before_frame_path": "images/cf27c5d1-f278-4cf6-a572-6da0d99c8cf9_pre_250_original.png",
+    "best_frame_path": "images/cf27c5d1-f278-4cf6-a572-6da0d99c8cf9_best_final_original.png",
+    "end_frame_path": "images/cf27c5d1-f278-4cf6-a572-6da0d99c8cf9_end_original.png",
+    "assets_json": [
+      {
+        "kind": "pre_1000",
+        "path": "images/cf27c5d1-f278-4cf6-a572-6da0d99c8cf9_pre_1000_original.png",
+        "source_time": 185.933,
+        "offset_ms": -985,
+        "captured_at": "2026-10-03T11:08:35.168897+00:00",
+        "segment_id": "youtube-0000",
+        "frame_id": 401,
+        "timing_quality": "request_video_frame_callback_estimate",
+        "timing_error_ms": 52.81445,
+        "image_role": "original_full_frame",
+        "sha256": "1339ae80c288831f3f3eec737c299e15a27786aa2ddd679a5d6e8c91acd33e41"
+      },
+      {
+        "kind": "pre_500",
+        "path": "images/cf27c5d1-f278-4cf6-a572-6da0d99c8cf9_pre_500_original.png",
+        "source_time": 186.433,
+        "offset_ms": -485,
+        "captured_at": "2026-10-03T11:08:35.671712+00:00",
+        "segment_id": "youtube-0000",
+        "frame_id": 417,
+        "timing_quality": "request_video_frame_callback_estimate",
+        "timing_error_ms": 53.0712,
+        "image_role": "original_full_frame",
+        "sha256": "7fe210de185cb93471335b7e4af98b0661d19a6c6c1d45a33b741ff605d2cdf7"
+      },
+      {
+        "kind": "pre_250",
+        "path": "images/cf27c5d1-f278-4cf6-a572-6da0d99c8cf9_pre_250_original.png",
+        "source_time": 186.6538000000001,
+        "offset_ms": -264,
+        "captured_at": "2026-10-03T11:08:35.903355+00:00",
+        "segment_id": "youtube-0000",
+        "frame_id": 424,
+        "timing_quality": "request_video_frame_callback_estimate",
+        "timing_error_ms": 56.81615,
+        "image_role": "original_full_frame",
+        "sha256": "aeceaa0d724751b0d89a6080cb734688bf03fcebde6b4678188c1479dae1026c"
+      },
+      {
+        "kind": "start",
+        "path": "images/cf27c5d1-f278-4cf6-a572-6da0d99c8cf9_start_original.png",
+        "source_time": 186.9177000000002,
+        "offset_ms": 0,
+        "captured_at": "2026-10-03T11:08:36.168243+00:00",
+        "segment_id": "youtube-0000",
+        "frame_id": 434,
+        "timing_quality": "request_video_frame_callback_estimate",
+        "timing_error_ms": 58.51415,
+        "image_role": "original_full_frame",
+        "sha256": "7f3f712eba2299be53629b601a7facc2c2b30fe648780d5f50adbeb82c4c7b4b"
+      },
+      {
+        "kind": "crop_at_activation",
+        "path": "images/cf27c5d1-f278-4cf6-a572-6da0d99c8cf9_dialogue_original.png",
+        "image_role": "original_crop",
+        "source_time": 186.9177000000002
+      },
+      {
+        "kind": "best_at_activation",
+        "path": "images/cf27c5d1-f278-4cf6-a572-6da0d99c8cf9_best_original.png",
+        "source_time": 187.183,
+        "offset_ms": 265,
+        "captured_at": "2026-10-03T11:08:36.418398+00:00",
+        "segment_id": "youtube-0000",
+        "frame_id": 446,
+        "timing_quality": "request_video_frame_callback_estimate",
+        "timing_error_ms": 50.42865,
+        "image_role": "original_full_frame",
+        "sha256": "5d278c229b6566baddf9183ccb7d51ef8a5316bfd0846ee51d078cc5a90fb036"
+      },
+      {
+        "kind": "best",
+        "path": "images/cf27c5d1-f278-4cf6-a572-6da0d99c8cf9_best_final_original.png",
+        "source_time": 189.183,
+        "offset_ms": 2265,
+        "captured_at": "2026-10-03T11:08:38.416165+00:00",
+        "segment_id": "youtube-0000",
+        "frame_id": 531,
+        "timing_quality": "request_video_frame_callback_estimate",
+        "timing_error_ms": 50.1495,
+        "image_role": "original_full_frame",
+        "sha256": "0d64549e357e4b1ec8543e790cd9ebbb11541302049f860a9125b6a513ad3c90"
+      },
+      {
+        "kind": "end",
+        "path": "images/cf27c5d1-f278-4cf6-a572-6da0d99c8cf9_end_original.png",
+        "source_time": 191.667,
+        "offset_ms": 4749,
+        "captured_at": "2026-10-03T11:08:40.900193+00:00",
+        "segment_id": "youtube-0000",
+        "frame_id": 642,
+        "timing_quality": "request_video_frame_callback_estimate",
+        "timing_error_ms": 50.1153,
+        "image_role": "original_full_frame",
+        "sha256": "05d6db148d277c865f2734719c01dce537b9966dd17fd7d71980d2228a61cdf9"
+      },
+      {
+        "kind": "post_250",
+        "path": "images/cf27c5d1-f278-4cf6-a572-6da0d99c8cf9_post_250_original.png",
+        "source_time": 191.917,
+        "offset_ms": 4999,
+        "captured_at": "2026-10-03T11:08:41.149983+00:00",
+        "segment_id": "youtube-0000",
+        "frame_id": 654,
+        "timing_quality": "request_video_frame_callback_estimate",
+        "timing_error_ms": 49.76735,
+        "image_role": "original_full_frame",
+        "sha256": "d4a68a88f5a4ee4b9c1ae35cf0953cad098e76604ced8d90b3a57055ab4b94bb"
+      }
+    ],
+    "processing_variants_json": [],
+    "text_phash": "8d5cc97662a77289",
+    "context_phash": "c8d8f0f07173323e",
+    "character": null,
+    "emotion": null,
+    "review_status": "pending",
+    "truncated": false,
+    "timing_quality": "request_video_frame_callback_estimate",
+    "timing_error_ms": 58.51415,
+    "captured_at": "2026-10-03T11:08:36.168243+00:00",
+    "frame_id": 434,
+    "merged_into": null,
+    "created_at": "2026-10-03T11:09:01.154176",
+    "updated_at": "2026-10-03T11:09:04.402765"
+  },
+  {
+    "event_id": "91d7e96c-0064-49f4-bade-a5267fde2579",
+    "session_id": "f88089d6-53ca-4b0c-a179-215759bc2280",
+    "sequence": 4,
+    "segment_id": "youtube-0000",
+    "start_time": 191.933,
+    "end_time": 194.99700000000016,
+    "original_text": "WARREN Posso descansar quando morrer.",
+    "ocr_observations_json": [
+      {
+        "source_time": 191.933,
+        "text": "WARREN Pos e",
+        "confidence": 0.8540977835655212,
+        "bbox": [
+          471,
+          533,
+          210,
+          61
+        ]
+      },
+      {
+        "source_time": 192.0551000000001,
+        "text": "WARREN Posso des",
+        "confidence": 0.9996441304683685,
+        "bbox": [
+          472,
+          533,
+          209,
+          61
+        ]
+      },
+      {
+        "source_time": 192.19709999999998,
+        "text": "WARREN Posso descansa",
+        "confidence": 0.9998036623001099,
+        "bbox": [
+          472,
+          533,
+          209,
+          61
+        ]
+      },
+      {
+        "source_time": 192.3320000000002,
+        "text": "WARREN Posso descansar qua",
+        "confidence": 0.9995763897895813,
+        "bbox": [
+          472,
+          533,
+          214,
+          61
+        ]
+      },
+      {
+        "source_time": 192.46420000000018,
+        "text": "WARREN Posso descansar quando mo",
+        "confidence": 0.9997000992298126,
+        "bbox": [
+          472,
+          533,
+          281,
+          61
+        ]
+      },
+      {
+        "source_time": 192.5973000000002,
+        "text": "WARREN Posso descansar quando morrer.",
+        "confidence": 0.9993436634540558,
+        "bbox": [
+          471,
+          533,
+          332,
+          59
+        ]
+      },
+      {
+        "source_time": 193.9319,
+        "text": "WARREN Posso descansar quando morrer.",
+        "confidence": 0.9993349611759186,
+        "bbox": [
+          471,
+          533,
+          332,
+          59
+        ]
+      }
+    ],
+    "normalized_text": "warren posso descansar quando morrer",
+    "corrected_text": null,
+    "confidence": 0.9993349611759186,
+    "bbox_json": [
+      471,
+      533,
+      332,
+      59
+    ],
+    "crop_path": "images/e338da46-335e-464c-969a-7cb5273af80a_dialogue_final_original.png",
+    "start_frame_path": "images/e338da46-335e-464c-969a-7cb5273af80a_start_original.png",
+    "before_frame_path": "images/e338da46-335e-464c-969a-7cb5273af80a_pre_250_original.png",
+    "best_frame_path": "images/e338da46-335e-464c-969a-7cb5273af80a_best_final_original.png",
+    "end_frame_path": "images/e338da46-335e-464c-969a-7cb5273af80a_end_original.png",
+    "assets_json": [
+      {
+        "kind": "pre_1000",
+        "path": "images/e338da46-335e-464c-969a-7cb5273af80a_pre_1000_original.png",
+        "source_time": 190.93840000000003,
+        "offset_ms": -995,
+        "captured_at": "2026-10-03T11:08:40.183448+00:00",
+        "segment_id": "youtube-0000",
+        "frame_id": 609,
+        "timing_quality": "request_video_frame_callback_estimate",
+        "timing_error_ms": 55.34605,
+        "image_role": "original_full_frame",
+        "sha256": "e901b932a584d2b30c3fa800ed36a3e20bc3bd764ff7572f20bca962d4e5ad1c"
+      },
+      {
+        "kind": "pre_500",
+        "path": "images/e338da46-335e-464c-969a-7cb5273af80a_pre_500_original.png",
+        "source_time": 191.433,
+        "offset_ms": -500,
+        "captured_at": "2026-10-03T11:08:40.666549+00:00",
+        "segment_id": "youtube-0000",
+        "frame_id": 632,
+        "timing_quality": "request_video_frame_callback_estimate",
+        "timing_error_ms": 50.261449999999996,
+        "image_role": "original_full_frame",
+        "sha256": "2c7ebe91d22301c89a93b3a03f4c628824196cfd61ac5864b312861eeaa4fb7f"
+      },
+      {
+        "kind": "pre_250",
+        "path": "images/e338da46-335e-464c-969a-7cb5273af80a_pre_250_original.png",
+        "source_time": 191.683,
+        "offset_ms": -250,
+        "captured_at": "2026-10-03T11:08:40.916830+00:00",
+        "segment_id": "youtube-0000",
+        "frame_id": 643,
+        "timing_quality": "request_video_frame_callback_estimate",
+        "timing_error_ms": 50.23535,
+        "image_role": "original_full_frame",
+        "sha256": "1431f2ea952e9437f4ac4d6c357cb8e48065b53fd98817a51a0e371183c6cd45"
+      },
+      {
+        "kind": "start",
+        "path": "images/e338da46-335e-464c-969a-7cb5273af80a_start_original.png",
+        "source_time": 191.933,
+        "offset_ms": 0,
+        "captured_at": "2026-10-03T11:08:41.166643+00:00",
+        "segment_id": "youtube-0000",
+        "frame_id": 655,
+        "timing_quality": "request_video_frame_callback_estimate",
+        "timing_error_ms": 50.4257,
+        "image_role": "original_full_frame",
+        "sha256": "1a4ad7a5b64f1d061ea628b27db23fe4b0d48e2fe3bb885459d26d066b136129"
+      },
+      {
+        "kind": "crop_at_activation",
+        "path": "images/e338da46-335e-464c-969a-7cb5273af80a_dialogue_original.png",
+        "image_role": "original_crop",
+        "source_time": 191.933
+      },
+      {
+        "kind": "best_at_activation",
+        "path": "images/e338da46-335e-464c-969a-7cb5273af80a_best_original.png",
+        "source_time": 192.19709999999998,
+        "offset_ms": 264,
+        "captured_at": "2026-10-03T11:08:41.433399+00:00",
+        "segment_id": "youtube-0000",
+        "frame_id": 666,
+        "timing_quality": "request_video_frame_callback_estimate",
+        "timing_error_ms": 50.72675,
+        "image_role": "original_full_frame",
+        "sha256": "66fc01bdce9305ecc39680575786eed4035a537b2fa94c4224f6efb86d2e57fb"
+      },
+      {
+        "kind": "best",
+        "path": "images/e338da46-335e-464c-969a-7cb5273af80a_best_final_original.png",
+        "source_time": 192.19709999999998,
+        "offset_ms": 264,
+        "captured_at": "2026-10-03T11:08:41.433399+00:00",
+        "segment_id": "youtube-0000",
+        "frame_id": 666,
+        "timing_quality": "request_video_frame_callback_estimate",
+        "timing_error_ms": 50.72675,
+        "image_role": "original_full_frame",
+        "sha256": "66fc01bdce9305ecc39680575786eed4035a537b2fa94c4224f6efb86d2e57fb"
+      },
+      {
+        "kind": "end",
+        "path": "images/e338da46-335e-464c-969a-7cb5273af80a_end_original.png",
+        "source_time": 194.99700000000016,
+        "offset_ms": 3064,
+        "captured_at": "2026-10-03T11:08:44.232886+00:00",
+        "segment_id": "youtube-0000",
+        "frame_id": 750,
+        "timing_quality": "request_video_frame_callback_estimate",
+        "timing_error_ms": 50.623,
+        "image_role": "original_full_frame",
+        "sha256": "ec2ad89a8242ff02ff6b70cf0734299880ffa1dc08fbbfd8eed4b410b334ccdd"
+      },
+      {
+        "kind": "post_250",
+        "path": "images/e338da46-335e-464c-969a-7cb5273af80a_post_250_original.png",
+        "source_time": 195.2315000000002,
+        "offset_ms": 3299,
+        "captured_at": "2026-10-03T11:08:44.466463+00:00",
+        "segment_id": "youtube-0000",
+        "frame_id": 757,
+        "timing_quality": "request_video_frame_callback_estimate",
+        "timing_error_ms": 50.64025,
+        "image_role": "original_full_frame",
+        "sha256": "45662f13c4b459ee0e6de3a8173f9a2734adf095c153587f048af22cf87293cc"
+      }
+    ],
+    "processing_variants_json": [],
+    "text_phash": "dc19ce3d82376287",
+    "context_phash": "c8d8f0f1f1723338",
+    "character": null,
+    "emotion": null,
+    "review_status": "pending",
+    "truncated": false,
+    "timing_quality": "request_video_frame_callback_estimate",
+    "timing_error_ms": 50.4257,
+    "captured_at": "2026-10-03T11:08:41.166643+00:00",
+    "frame_id": 655,
+    "merged_into": null,
+    "created_at": "2026-10-03T11:09:05.497999",
+    "updated_at": "2026-10-03T11:09:07.636964"
+  },
+  {
+    "event_id": "f1d1a7ec-0498-458b-b4b5-19437160995f",
+    "session_id": "f88089d6-53ca-4b0c-a179-215759bc2280",
+    "sequence": 5,
+    "segment_id": "youtube-0000",
+    "start_time": 194.99700000000016,
+    "end_time": null,
+    "original_text": "WARREN anali Continue",
+    "ocr_observations_json": [
+      {
+        "source_time": 194.99700000000016,
+        "text": "WARREN Con",
+        "confidence": 0.9999907612800598,
+        "bbox": [
+          380,
+          533,
+          301,
+          59
+        ]
+      },
+      {
+        "source_time": 195.13170000000005,
+        "text": "WARREN Continue",
+        "confidence": 0.999987930059433,
+        "bbox": [
+          381,
+          533,
+          300,
+          59
+        ]
+      },
+      {
+        "source_time": 195.2646000000001,
+        "text": "WARREN anali Continue",
+        "confidence": 0.9999437928199768,
+        "bbox": [
+          381,
+          533,
+          300,
+          59
+        ]
+      }
+    ],
+    "normalized_text": "warren anali continue",
+    "corrected_text": null,
+    "confidence": 0.9999437928199768,
+    "bbox_json": [
+      381,
+      533,
+      300,
+      59
+    ],
+    "crop_path": "images/d3284ca0-6b88-4e72-b567-efcf7d098f64_dialogue_original.png",
+    "start_frame_path": "images/d3284ca0-6b88-4e72-b567-efcf7d098f64_start_original.png",
+    "before_frame_path": "images/d3284ca0-6b88-4e72-b567-efcf7d098f64_pre_250_original.png",
+    "best_frame_path": "images/d3284ca0-6b88-4e72-b567-efcf7d098f64_best_original.png",
+    "end_frame_path": null,
+    "assets_json": [
+      {
+        "kind": "pre_1000",
+        "path": "images/d3284ca0-6b88-4e72-b567-efcf7d098f64_pre_1000_original.png",
+        "source_time": 193.99750000000006,
+        "offset_ms": -1000,
+        "captured_at": "2026-10-03T11:08:43.234767+00:00",
+        "segment_id": "youtube-0000",
+        "frame_id": 720,
+        "timing_quality": "request_video_frame_callback_estimate",
+        "timing_error_ms": 51.095,
+        "image_role": "original_full_frame",
+        "sha256": "2cc933a966a84129e04d7a3097ffc9cb487459c0bbd266e4dad881c2a4ac6eb5"
+      },
+      {
+        "kind": "pre_500",
+        "path": "images/d3284ca0-6b88-4e72-b567-efcf7d098f64_pre_500_original.png",
+        "source_time": 194.49750000000006,
+        "offset_ms": -500,
+        "captured_at": "2026-10-03T11:08:43.732834+00:00",
+        "segment_id": "youtube-0000",
+        "frame_id": 735,
+        "timing_quality": "request_video_frame_callback_estimate",
+        "timing_error_ms": 50.59455,
+        "image_role": "original_full_frame",
+        "sha256": "b34aec6de9bef3e2de66b46b85ed9cc10aec8758614257f68dccdcf85c95c820"
+      },
+      {
+        "kind": "pre_250",
+        "path": "images/d3284ca0-6b88-4e72-b567-efcf7d098f64_pre_250_original.png",
+        "source_time": 194.73140000000012,
+        "offset_ms": -266,
+        "captured_at": "2026-10-03T11:08:43.966170+00:00",
+        "segment_id": "youtube-0000",
+        "frame_id": 742,
+        "timing_quality": "request_video_frame_callback_estimate",
+        "timing_error_ms": 50.4666,
+        "image_role": "original_full_frame",
+        "sha256": "8691430f4b2c6ce6e243a6f49484440162debeaec45f8d6bfa0cda2335e67120"
+      },
+      {
+        "kind": "start",
+        "path": "images/d3284ca0-6b88-4e72-b567-efcf7d098f64_start_original.png",
+        "source_time": 194.99700000000016,
+        "offset_ms": 0,
+        "captured_at": "2026-10-03T11:08:44.232886+00:00",
+        "segment_id": "youtube-0000",
+        "frame_id": 750,
+        "timing_quality": "request_video_frame_callback_estimate",
+        "timing_error_ms": 50.623,
+        "image_role": "original_full_frame",
+        "sha256": "ec2ad89a8242ff02ff6b70cf0734299880ffa1dc08fbbfd8eed4b410b334ccdd"
+      },
+      {
+        "kind": "best",
+        "path": "images/d3284ca0-6b88-4e72-b567-efcf7d098f64_best_original.png",
+        "source_time": 195.2646000000001,
+        "offset_ms": 268,
+        "captured_at": "2026-10-03T11:08:44.499363+00:00",
+        "segment_id": "youtube-0000",
+        "frame_id": 758,
+        "timing_quality": "request_video_frame_callback_estimate",
+        "timing_error_ms": 50.40805,
+        "image_role": "original_full_frame",
+        "sha256": "5dd5e18a3aa108905c1fda6e8e5e08f8b52e455d9a3ea275c1be3a0a5fafa9b1"
+      }
+    ],
+    "processing_variants_json": [],
+    "text_phash": "e431ec3bc25a5be0",
+    "context_phash": "c8d8f0f17173321e",
+    "character": null,
+    "emotion": null,
+    "review_status": "pending",
+    "truncated": false,
+    "timing_quality": "request_video_frame_callback_estimate",
+    "timing_error_ms": 50.623,
+    "captured_at": "2026-10-03T11:08:44.232886+00:00",
+    "frame_id": 750,
+    "merged_into": null,
+    "created_at": "2026-10-03T11:09:08.558462",
+    "updated_at": "2026-10-03T11:09:08.558462"
+  }
+]

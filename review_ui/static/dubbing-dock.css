@@ -1,0 +1,60 @@
+/* Preferências de encaixe independentes para os painéis da Dublagem. */
+#dubGrid:not(.dock-enabled)>.dub-dock-zone{display:contents}
+#dubGrid.dock-enabled{position:relative;grid-template-columns:minmax(200px,19fr) 8px minmax(400px,40fr) 8px minmax(180px,16fr) 8px minmax(300px,25fr);grid-template-rows:minmax(180px,.52fr) 6px minmax(150px,.48fr);column-gap:0;row-gap:0}
+#dubGrid.dock-enabled>.left-column{grid-column:1;grid-row:1}
+#dubGrid.dock-enabled>.center-column{grid-column:3;grid-row:1}
+#dubGrid.dock-enabled>.extra-column{grid-column:5;grid-row:1}
+#dubGrid.dock-enabled>.timeline-row{grid-column:1/7;grid-row:3}
+#dubGrid.dock-enabled>.timeline-row{display:flex;flex-direction:column;gap:0;min-width:0;min-height:0;overflow:auto;scrollbar-color:#334865 transparent;scrollbar-width:thin}
+#dubGrid.dock-enabled>.right-column{grid-column:7;grid-row:1/4}
+#dubGrid.dock-enabled>.dub-column-divider.left{grid-column:2;grid-row:1}
+#dubGrid.dock-enabled>.dub-column-divider.center{grid-column:4;grid-row:1}
+#dubGrid.dock-enabled>.dub-column-divider.right{grid-column:6;grid-row:1/4}
+#dubGrid.dock-enabled>.dub-column-divider{z-index:5;width:8px;min-width:8px;height:100%;min-height:0;align-self:stretch;justify-self:stretch;background:linear-gradient(90deg,transparent calc(50% - .5px),#263c57 calc(50% - .5px),#263c57 calc(50% + .5px),transparent calc(50% + .5px))}
+#dubGrid.dock-enabled>.dub-column-divider:hover,#dubGrid.dock-enabled>.dub-column-divider:focus-visible,#dubGrid.dock-enabled>.dub-column-divider.dragging{background:linear-gradient(90deg,transparent calc(50% - 1px),#438de0 calc(50% - 1px),#438de0 calc(50% + 1px),transparent calc(50% + 1px))}
+#dubGrid.dock-enabled>.dub-row-divider{grid-column:1/-1;grid-row:2;z-index:6;width:100%;min-height:0;align-self:stretch;justify-self:stretch}
+#dubGrid.dock-enabled>.dub-row-divider span{opacity:0}
+#dubGrid.dock-enabled>.dub-row-divider:hover span,#dubGrid.dock-enabled>.dub-row-divider:focus-visible span,#dubGrid.dock-enabled>.dub-row-divider.dragging span{opacity:1}
+#dubGrid.dock-enabled>.dub-dock-zone{align-self:stretch}
+#dubGrid.dock-enabled>#dubDockExtra:empty::after{content:"4ª coluna · arraste Personagens ou Timeline para cá";min-height:0;padding:12px;text-align:center;line-height:1.5}
+#dubGrid.dock-enabled .dock-group{min-width:0}
+#dubGrid.dock-enabled .dock-group>.panel>.panel-title{cursor:grab;user-select:none}
+#dubGrid.dock-enabled .dock-group>.panel>.panel-title:active{cursor:grabbing}
+#dubGrid.dock-enabled .dock-group>.panel>.panel-title button{cursor:pointer}
+#dubGrid.dock-enabled .dock-group.dock-compact:not(.dock-minimized-group){align-self:stretch;flex:0 0 auto!important}
+#dubGrid .dock-float-layer{position:absolute;inset:0;z-index:20;pointer-events:none;overflow:visible}
+#dubGrid .dock-float-layer:empty::after{display:none}
+#dubGrid .dock-group .dub-panel-heading{cursor:grab;user-select:none}
+#dubGrid .dock-group .dub-panel-heading:active{cursor:grabbing}
+#dubGrid .dock-group .dub-panel-heading button{cursor:pointer}
+#dubGrid .dock-collapsed>:not(.panel-title):not(.dub-panel-heading){display:none!important}
+#dubGrid .dock-collapsed .dub-panel-heading{height:31px;border-bottom:0}
+#dubGrid .dock-collapsed .dub-panel-heading>div:first-child{display:flex!important}
+#dubGrid .dock-floating .dub-panel-heading{cursor:move}
+#dubGrid .dock-floating .dub-panel-heading button{cursor:pointer}
+
+.dub-profile-mode-row{display:grid;grid-template-columns:minmax(210px,1fr) minmax(130px,1fr);align-items:end;gap:8px;margin-top:6px}
+.dub-profile-mode-row>#dubProfileModeHint{padding:0 0 5px;color:#8598b2;font-size:8px;line-height:1.4}
+.dub-voice-source-picker{display:flex;flex-wrap:wrap;align-items:center;gap:5px;margin:0;padding:5px 6px 6px;border:1px solid #2b405b;border-radius:4px;background:#0b1523;min-width:0}
+.dub-voice-source-picker legend{padding:0 4px;color:#9eafc5;font-size:8px}
+.dub-voice-source-picker label{position:relative;display:flex!important;align-items:center;gap:5px;min-width:0;padding:5px 8px;border:1px solid #344862;border-radius:4px;background:#111e30;color:#bac9dc!important;font-size:8px!important;cursor:pointer}
+.dub-voice-source-picker label:has(input:checked){border-color:#398bff;background:#12345a;color:#eef6ff!important}
+.dub-voice-source-picker input{width:12px;height:12px;margin:0;accent-color:#438fff}
+.dub-voice-source-picker label span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.dub-roi-audio-source{display:grid;gap:3px;padding:7px 8px;border:1px solid #285d80;border-radius:4px;background:#0c2637;color:#a9c5df;font-size:8px}
+.dub-roi-audio-source b{color:#8ac9ff;font-size:8px}
+.dub-roi-audio-source span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#e1efff;font:9px var(--mono)}
+.dub-roi-audio-source small{color:#91a9c3;font-size:7px}
+.dub-reference-upload{display:grid;grid-template-columns:minmax(120px,1fr) minmax(110px,1.25fr);align-items:center;gap:7px;min-width:0}
+.dub-clone-card>.dub-roi-audio-source,.dub-clone-card>.dub-reference-upload{grid-column:1/-1}
+.dub-clone-card>#dubRemoveReference{justify-self:start}
+.dub-clone-card>.dub-reference-transcript,.dub-clone-card>#dubProfileReferenceStatus,.dub-clone-card>.dub-reference-preview{grid-column:1/-1}
+
+@media(max-width:1450px){#dubGrid.dock-enabled{grid-template-columns:minmax(180px,20fr) 8px minmax(340px,40fr) 8px minmax(150px,17fr) 8px minmax(270px,23fr)}}
+@media(max-height:760px){#dubGrid.dock-enabled{grid-template-rows:minmax(155px,.52fr) 6px minmax(130px,.48fr)}.dub-profile-mode-row{gap:5px}.dub-voice-source-picker{padding:3px 5px 4px}}
+
+/* Keep the video timeline and generated-audio preview as independent dock cards. */
+#dubGrid.dock-enabled>.timeline-row{flex-direction:row;overflow:hidden}
+#dubGrid.dock-enabled>.timeline-row>.dock-divider.horizontal{flex:0 0 8px;width:8px;min-width:8px;height:auto;min-height:0;align-self:stretch;cursor:col-resize}
+#dubGrid:not(.dock-enabled)>.dub-dock-zone.timeline-row{grid-column:2;grid-row:2;display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:6px;min-width:0;min-height:0}
+#dubGrid:not(.dock-enabled)>.timeline-row>.dub-timeline-panel,#dubGrid:not(.dock-enabled)>.timeline-row>.dub-sync-panel{grid-column:auto;grid-row:auto;min-width:0;min-height:0}

@@ -1,0 +1,621 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>DubSync — {{ project.name }}</title>
+  <link rel="icon" type="image/x-icon" href="/favicon.ico?v=20261004">
+  <link rel="icon" type="image/png" sizes="256x256" href="/static/dubsync-icon.png?v=20261004">
+  <link rel="icon" type="image/svg+xml" href="/static/dubsync-icon.svg?v=20261004">
+  <link rel="apple-touch-icon" href="/static/dubsync-icon.png?v=20261004">
+  <link rel="stylesheet" href="/static/style.css?v=20261006-2">
+  <link rel="stylesheet" href="/static/status.css?v=20261005-4">
+  <link rel="stylesheet" href="/static/dock.css?v=20261004-1">
+  <link rel="stylesheet" href="/static/roi.css?v=20261005-9">
+  <link rel="stylesheet" href="/static/interaction.css?v=20261005-6">
+  <link rel="stylesheet" href="/static/dialogue-timeline.css?v=20261006-2">
+  <link rel="stylesheet" href="/static/character-combobox.css?v=20261005-2">
+  <link rel="stylesheet" href="/static/dubbing.css?v=20261006-4">
+  <link rel="stylesheet" href="/static/dubbing-media.css?v=20261004-1">
+  <link rel="stylesheet" href="/static/dubbing-dock.css?v=20261006-3">
+  <link rel="stylesheet" href="/static/dubbing-layout.css?v=20261006-9">
+  <link rel="stylesheet" href="/static/dubbing-studio.css?v=20261006-4">
+  <link rel="stylesheet" href="/static/layout-presets.css?v=20261007-1">
+  <link rel="stylesheet" href="/static/omnivoice-monitor.css?v=20261006-1">
+  <link rel="stylesheet" href="/static/appearance.css?v=20261006-3">
+  <script>
+    window.DUBSYNC_PROJECT_ID = {{ project.project_id|tojson }};
+    window.DUBSYNC_PROJECT = {{ project|tojson }};
+    if (window.DUBSYNC_PROJECT?.cover_path) {
+      const coverUrl = `/api/projects/${encodeURIComponent(window.DUBSYNC_PROJECT_ID)}/cover`;
+      document.documentElement.style.setProperty("--project-cover-image", `url("${coverUrl}")`);
+    }
+    window.DUBSYNC_INITIAL_AREA = {{ initial_area|tojson }};
+    (() => {
+      const projectId = window.DUBSYNC_PROJECT_ID;
+      const originalFetch = window.fetch.bind(window);
+      window.fetch = (input, init = {}) => {
+        const url = new URL(typeof input === "string" ? input : input.url, location.href);
+        if (projectId && url.origin === location.origin && url.pathname.startsWith("/api/") && !url.pathname.startsWith("/api/projects")) {
+          const headers = new Headers(input instanceof Request ? input.headers : undefined);
+          new Headers(init.headers || {}).forEach((value, key) => headers.set(key, value));
+          headers.set("X-DubSync-Project", projectId);
+          init = { ...init, headers };
+        }
+        return originalFetch(input, init);
+      };
+    })();
+  </script>
+</head>
+<body>
+  <header class="appbar">
+    <div class="brand-lockup"><img class="brand-mark" src="/static/dubsync-icon.svg?v=20261004" alt=""><strong>DubSync</strong><small>v0.2.0</small></div>
+    <nav class="main-nav" aria-label="Navegação principal">
+      <a class="nav-item nav-item-link nav-intro" href="/" title="Ir para a tela inicial de projetos">
+        <svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 10.5 12 4l8 6.5V20a1 1 0 0 1-1 1h-5v-6h-4v6H5a1 1 0 0 1-1-1z"/><path d="M9 9.5h6"/></svg><span>Intro</span>
+      </a>
+      <button class="nav-item nav-capture {% if initial_area == 'capture' %}active{% endif %}" data-view="main" data-anchor="capture" data-project-area="capture">
+        <svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7.5A2.5 2.5 0 0 1 6.5 5h11A2.5 2.5 0 0 1 20 7.5v9a2.5 2.5 0 0 1-2.5 2.5h-11A2.5 2.5 0 0 1 4 16.5z"/><circle cx="12" cy="12" r="3.2"/><path d="M8 5 9 3h6l1 2"/></svg><span>Captura</span>
+      </button>
+      <button class="nav-item nav-dubbing {% if initial_area == 'dubbing' %}active{% endif %}" data-view="dubbing" data-project-area="dubbing">
+        <svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 10v4m4-8v12m4-15v18m4-13v8m4-11v14m4-10v6"/></svg><span>Dublagem</span>
+      </button>
+      <a class="nav-item nav-item-link nav-integration" href="/projects/{{ project.project_id }}/integration" data-project-area="integration" title="Configurar jogos, plugins, mapeamento e pacotes runtime">
+        <svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 3h6l1 3 3 1v6l-3 1-1 3H9l-1-3-3-1V7l3-1z"/><circle cx="12" cy="10" r="2.5"/><path d="M9 17v4h6v-4"/></svg><span>Integração</span>
+      </a>
+      <button class="nav-item nav-settings {% if initial_area == 'settings' %}active{% endif %}" data-settings-open data-project-area="settings">
+        <svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 8.5a3.5 3.5 0 1 0 0 7 3.5 3.5 0 0 0 0-7Z"/><path d="m19.4 13.5 1.1.9-1.4 2.4-1.4-.5a7.9 7.9 0 0 1-1.5.9l-.2 1.5h-2.8l-.3-1.5a7.9 7.9 0 0 1-1.5-.9l-1.4.5-1.4-2.4 1.1-.9a7.1 7.1 0 0 1 0-1.8l-1.1-.9 1.4-2.4 1.4.5a7.9 7.9 0 0 1 1.5-.9l.3-1.5h2.8l.2 1.5a7.9 7.9 0 0 1 1.5.9l1.4-.5 1.4 2.4-1.1.9a7.1 7.1 0 0 1 0 1.8Z" transform="translate(-1.4 -1.4) scale(1.12)"/></svg><span>Configurações</span>
+      </button>
+    </nav>
+    <div class="appbar-right">
+      <button id="omnivoiceHeaderButton" class="omnivoice-header-badge waiting" type="button" aria-haspopup="dialog" aria-controls="omnivoiceMonitorDialog" title="Ver uso de CPU, RAM, contêiner e processos OmniVoice">
+        <svg class="omnivoice-header-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2v12m-4-8v5a4 4 0 0 0 8 0V6M5 11a7 7 0 0 0 14 0M12 18v4m-4 0h8"/></svg>
+        <span class="omnivoice-header-dot" aria-hidden="true"></span>
+        <span id="omnivoiceHeaderLabel">OmniVoice · verificando</span>
+        <span id="omnivoiceHeaderCpu" class="omnivoice-header-cpu">CPU —</span>
+      </button>
+      <a class="header-project-back" href="/" title="Voltar ao Hub de Projetos">← Projetos</a>
+      <div class="header-project-pill" title="Projeto e idioma de dublagem ativos"><span class="header-project-icon" aria-hidden="true">◈</span><span id="projectHeaderName">{{ project.name }}</span><small id="projectHeaderLanguage">{{ project.dub_language|upper }}</small></div>
+      <div class="layout-menu" id="layoutMenu">
+        <button id="layoutMenuToggle" type="button" class="layout-menu-toggle" aria-haspopup="true" aria-expanded="false" aria-controls="layoutMenuPopover" title="Salvar, organizar e restaurar layouts desta tela">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="7" height="9" rx="1"/><rect x="14" y="3" width="7" height="5" rx="1"/><rect x="14" y="12" width="7" height="9" rx="1"/><rect x="3" y="16" width="7" height="5" rx="1"/></svg>
+          <span>Layouts</span>
+          <svg class="layout-chevron" viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
+        </button>
+        <section id="layoutMenuPopover" class="layout-menu-popover" role="region" aria-label="Gerenciar layouts" hidden>
+          <header class="layout-menu-heading"><div><strong id="layoutMenuTitle">Layouts</strong><small id="layoutMenuScopeLabel">Esta tela</small></div><button id="layoutMenuClose" type="button" class="layout-icon-button" aria-label="Fechar menu de layouts" title="Fechar"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m18 6-12 12M6 6l12 12"/></svg></button></header>
+          <div id="layoutPresetList" class="layout-preset-list" role="listbox" aria-label="Layouts salvos"></div>
+          <p id="layoutPresetEmpty" class="layout-empty">Ainda não há layouts salvos para esta tela.</p>
+          <div class="layout-menu-actions">
+            <button id="layoutApply" type="button" class="button primary layout-action" disabled><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m5 12 4 4L19 6"/></svg>Aplicar</button>
+            <button id="layoutSaveAs" type="button" class="button layout-action"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>Salvar como novo</button>
+            <button id="layoutUpdate" type="button" class="button layout-action" disabled><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 7v5h-5M4 17v-5h5"/><path d="M5.6 9A7 7 0 0 1 18 6l2 6M4 12l2 6a7 7 0 0 0 12.4-3"/></svg>Atualizar</button>
+            <button id="layoutRename" type="button" class="button layout-action" disabled><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L8 18l-4 1 1-4Z"/></svg>Renomear</button>
+            <button id="layoutDelete" type="button" class="button danger layout-action" disabled><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h18M8 6V4h8v2m3 0-1 14H6L5 6m4 4v6m6-6v6"/></svg>Excluir</button>
+          </div>
+          <button id="layoutRestoreDefault" type="button" class="layout-restore-default"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12a9 9 0 1 0 2.64-6.36L3 8"/><path d="M3 3v5h5"/><path d="M12 7v5l3 2"/></svg>Restaurar layout padrão desta tela</button>
+          <p class="layout-menu-hint">Seus layouts ficam separados por tela e neste navegador.</p>
+        </section>
+      </div>
+      <button type="button" class="header-action" title="A sessão selecionada é mostrada no painel Status da Sessão e no filtro da Lista de Eventos.">▤ <span>Sessão Atual</span></button>
+      <span id="health" class="health">Verificando…</span>
+    </div>
+  </header>
+
+  <main class="app-grid" id="appGrid" data-layout-scope="capture">
+    <aside class="left-column">
+      <section class="panel source-panel" id="sourcePanel">
+        <div class="panel-title"><h2>Fonte de Vídeo</h2><span class="panel-kicker">ENTRADA</span></div>
+        <div class="source-tabs" role="tablist"><button class="source-tab active" data-mode="youtube">▶ YouTube</button><button class="source-tab" data-mode="file">▣ Arquivo</button><button class="source-tab disabled" disabled title="Captura de jogo em tempo real está planejada para uma fase futura.">♧ Jogo</button></div>
+        <label id="urlField" class="field">URL do YouTube<div class="input-with-button"><input id="youtubeUrl" type="url" placeholder="https://www.youtube.com/watch?v=…"><button class="icon-button" type="button" title="Colar URL" disabled>▢</button></div><small class="microcopy">O DubSync baixa somente o vídeo na melhor qualidade disponível.</small></label>
+        <div id="fileField" class="hidden"><label class="field">Arquivo de vídeo local<div class="input-with-button"><input id="filePath" type="text" placeholder="C:\\Videos\\REPLACED.mp4" autocomplete="off"><button id="openVideoFile" type="button" class="button quiet" title="Selecionar um arquivo MP4 ou WebM no computador">▣ Abrir vídeo</button></div></label><div id="fileOrigin" class="file-origin hidden"><div><b>Baixado do YouTube</b><span id="fileOriginDetails"></span></div></div></div>
+        <div id="initialRangeConfig"><div class="two-fields"><label class="field">Início (hh:mm:ss)<input id="sourceStart" type="text" value="00:00:00" inputmode="numeric"></label><label class="field">Finalizar em (hh:mm:ss)<input id="sourceDuration" type="text" value="00:15:00" inputmode="numeric"></label></div><p id="initialRangeSummary" class="microcopy range-summary">Primeiro bloco: 00:00:00 → 00:15:00 · 00:15:00 de análise.</p></div>
+        <p id="continuationRangeSummary" class="microcopy range-summary hidden"></p>
+        <div id="nextBlockConfig" class="next-block-config"><label class="field">Próximo bloco (minutos)<input id="nextBlockMinutes" type="number" min="1" max="240" step="1" value="20"></label><button id="nextSegmentButton" type="button" class="button primary" disabled>Próximo bloco&nbsp; ▶</button></div>
+        <label class="field">Idioma (opcional)<select id="language"><option value="en">Inglês (original)</option><option value="pt">Português</option><option value="es">Espanhol</option><option value="fr">Francês</option><option value="de">Alemão</option><option value="ja">Japonês</option><option value="ko">Coreano</option><option value="ch">Chinês</option></select></label>
+        <div class="control-caption" id="transportCaption">Controles</div>
+        <div class="transport-row"><button id="playButton" class="transport play" type="button">⬇ Baixar vídeo</button><button id="pauseButton" class="transport" type="button" disabled>Ⅱ Pausar</button><button id="stopButton" class="transport stop" type="button" disabled>■ Parar</button></div>
+        <div class="segment-config"><div class="control-caption">Captura e análise em blocos · YouTube</div><label class="field" title="O app captura este intervalo, pausa para analisar os quadros e depois retoma o vídeo.">Intervalo de cada bloco (segundos)<input id="segmentDuration" type="number" min="5" max="900" step="1" value="60" title="Duração do bloco de captura; aceita de 5 a 900 segundos."></label><p class="microcopy">Ao fim de cada bloco, a captura pausa enquanto os quadros são analisados e depois continua. Disponível de 5 a 900 segundos.</p></div>
+        <div class="form-actions hidden" aria-hidden="true"><label id="blockAutomationField" class="block-automation-field hidden" title="No modo automático, ao concluir cada bloco o DubSync inicia o próximo até chegar ao fim do vídeo.">Continuidade<select id="blockAutomationMode" aria-label="Continuidade entre blocos"><option value="manual">Manual</option><option value="automatic">Automática até o fim</option></select></label></div>
+      </section>
+      <section class="panel roi-panel" id="roiPanel" aria-labelledby="roiPanelHeading">
+        <div class="panel-title"><h2 id="roiPanelHeading">Regiões de diálogo</h2><span class="panel-kicker">ROI</span></div>
+        <div class="roi-panel-body"><div class="roi-controls"><button id="selectCaptureButton" type="button" class="wide-button" hidden>☑ Selecionar área do vídeo</button><button id="addRoiButton" type="button" class="wide-button outline">⌖ Adicionar região de diálogo (ROI)</button><div id="roiList" class="roi-list"></div><p class="microcopy">Arraste ROIs para mover; use o canto inferior direito para redimensionar.</p></div></div>
+      </section>
+      <section class="panel status-panel" id="sessionPanel">
+        <div class="panel-title"><h2>Status da Sessão</h2><span id="sessionState" class="state-dot idle">Pronto</span></div>
+        <div class="session-status-overview">
+          <div class="session-status-summary">
+            <div class="status-grid"><span>Estado</span><b id="statusStateText">Pronto</b><span>Bloco</span><b id="statusSegment">—</b><span>Tempo</span><b id="statusSourceTime">00:00 / 00:00</b><span>Frames</span><b id="framesCaptured">0</b><span>Analisados</span><b id="framesAnalyzed">0</b><span>FPS</span><b id="effectiveFps">—</b><span>Sync</span><b id="timingQuality">—</b><span>Arquivo</span><b id="currentFile">—</b></div>
+            <p id="sessionDetail" class="session-detail">Aguardando a configuração da fonte.</p><p id="sessionError" class="error-text"></p>
+          </div>
+        </div>
+        <div class="analysis-activity" id="analysisActivity" aria-live="polite">
+          <div class="activity-heading"><b>Atividade da análise</b><span id="activityStage" data-stage="idle">Aguardando</span></div>
+          <div class="activity-meter"><div class="activity-meter-track"><span id="activityMeterFill"></span></div><small id="activityProgressText">Inicie uma análise para acompanhar os frames.</small></div>
+          <div class="activity-stats"><span>Frame <b id="activityFrame">—</b></span><span><i id="activityFramesReadLabel">Lidos</i> <b id="activityFramesRead">0</b>/<b id="activityFramesTotal">—</b></span><span>Amostrados <b id="activityFramesAnalyzed">0</b></span><span>OCR <b id="activityOcrCalls">0</b> · falhas <b id="activityOcrFailures">0</b></span><span>Diálogos <b id="activityEvents">0</b> · duplicatas <b id="activityDuplicates">0</b></span></div>
+          <p id="activityLastOcr" class="activity-last-ocr">Último OCR: aguardando a primeira consulta.</p>
+          <ol id="activityHistory" class="activity-history"><li>A atividade recente aparecerá aqui.</li></ol>
+        </div>
+        <div id="coveragePanel" class="coverage-panel hidden"><div class="coverage-title">Análises concluídas deste vídeo</div><div id="coverageList" class="coverage-list"></div></div>
+        <span id="stats" class="hidden"></span>
+      </section>
+      <section class="panel dialogue-status-panel" id="dialogueStatusPanel">
+        <div class="panel-title"><h2 id="dialogueStatusTitle">Status dos diálogos</h2><strong id="dialogueGreenPercent">0%</strong></div>
+        <div class="dialogue-status-card">
+          <div class="dialogue-green-summary"><b id="dialogueGreenRatio">0 / 0</b><span>Verdes · meta 100% dos ativos</span></div>
+          <div class="dialogue-green-track" role="progressbar" aria-label="Proporção de diálogos confirmados ou corrigidos entre os ativos" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><span id="dialogueGreenProgress"></span></div>
+          <div id="dialogueStatusStacked" class="dialogue-status-stacked" role="img" aria-label="Comparativo de status dos diálogos no total"><span id="dialogueStackGreen" class="green"></span><span id="dialogueStackPending" class="yellow"></span><span id="dialogueStackLow" class="red"></span><span id="dialogueStackDiscarded" class="gray"></span></div>
+          <div class="dialogue-status-legend">
+            <span title="Diálogos confirmados ou corrigidos"><i class="green"></i>Verdes <b id="dialogueGreenBreakdown">0 · 0%</b></span>
+            <span title="Diálogos aguardando revisão"><i class="yellow"></i>Amarelos <b id="dialoguePendingBreakdown">0 · 0%</b></span>
+            <span title="Pendentes com baixa confiança do OCR"><i class="red"></i>Vermelhos <b id="dialogueLowBreakdown">0 · 0%</b></span>
+            <span title="Diálogos descartados, fora da meta de revisão"><i class="gray"></i>Descartados <b id="dialogueDiscardedBreakdown">0 · 0%</b></span>
+          </div>
+          <small id="dialogueTotalLabel" class="dialogue-total-label">Total: 0 · carregando resumo.</small>
+          <small id="dialogueStatusScope" class="dialogue-status-scope">Todas as sessões · independente dos filtros da lista</small>
+        </div>
+      </section>
+    </aside>
+
+    <section class="center-column" id="capture">
+      <section class="panel video-overview-panel" id="videoOverview" aria-label="Progresso geral do vídeo">
+        <div class="panel-title overview-title"><h2>Progresso Geral do Vídeo</h2><span id="overviewCurrentLabel" class="overview-current">Carregue um vídeo para montar os blocos</span><div class="overview-actions"><span id="overviewProgressLabel">—</span><button id="previousBlockButton" class="button quiet" type="button" disabled title="Voltar para o bloco anterior desta sessão">↶ Bloco anterior</button></div></div>
+        <div class="overview-ruler" id="overviewRuler" aria-hidden="true"></div>
+        <div class="overview-track" id="overviewTrack" role="img" aria-label="Linha do tempo global do vídeo"><div class="overview-blocks" id="overviewBlocks"></div><div class="overview-cursor" id="overviewCursor"></div></div>
+      </section>
+      <section class="panel preview-panel">
+        <div class="panel-title"><h2>Pré-visualização / Captura</h2><div class="preview-badges"><span id="resolutionBadge">Sem imagem</span><span id="captureStatusBadge" class="capture-badge">AGUARDANDO FONTE</span></div></div>
+        <div class="preview-stage"><video id="videoPlayer" class="video-player hidden" playsinline preload="metadata" aria-label="Player do vídeo local"></video><canvas id="previewCanvas" aria-label="Pré-visualização e regiões de diálogo"></canvas><div id="previewEmpty" class="preview-empty"><span class="empty-play">▶</span><b>A pré-visualização aparecerá aqui</b><small>Use o player para navegar e ajuste as ROIs diretamente sobre o vídeo.</small></div><span id="previewOverlayState" class="preview-overlay-state hidden" >ANÁLISE DO TRECHO</span></div>
+        <div class="preview-transport"><button id="previewToggle" type="button" class="play-glyph" aria-label="Reproduzir vídeo" title="Reproduzir vídeo" disabled>▶</button><span id="previewTime" class="preview-time">00:00 / 00:12:10</span><input id="seekSlider" type="range" min="0" max="900" value="0" step="0.05" disabled aria-label="Posição no trecho analisado"><button type="button" class="sound-glyph" disabled title="Este vídeo foi baixado sem áudio e o DubSync não processa áudio">◖ ×</button><button type="button" class="expand-glyph" id="fitPreview" title="Ajustar prévia">⛶</button></div>
+      </section>
+
+      <section class="panel timeline-panel">
+        <div class="timeline-heading"><h2>Linha do Tempo de Eventos</h2><div class="timeline-tools"><div class="legend"><span><i class="green"></i>Confirmado</span><span><i class="yellow"></i>Pendente</span><span id="fineSweepLegend" class="hidden"><i class="audit-yellow"></i>Divergência</span><span><i class="red"></i>Baixa confiança</span><span><i class="gray"></i>Descartado</span></div><button id="addAudioMarker" type="button" class="button quiet" disabled title="Salva um ponto de sincronização futuro; nenhum áudio é lido">＋ Início de áudio</button><button id="addManualDialogue" type="button" class="button quiet" title="Adicionar manualmente um diálogo no tempo atual do vídeo (atalho configurável: N).">＋ Diálogo</button><button id="duplicateDialogue" type="button" class="button quiet" disabled title="Duplica o diálogo selecionado a partir do tempo atual do playhead. O texto e as imagens de referência mantêm a procedência do evento de origem.">⧉ Duplicar</button><button id="retryDialogueOcr" type="button" class="button quiet" disabled title="Executa novamente o OCR no frame do diálogo selecionado, sem substituir o OCR original ou correções humanas automaticamente.">◉ Refazer OCR</button><button id="followDialogue" type="button" class="button quiet follow-dialogue" aria-pressed="false" title="Ativar seleção automática ao cruzar o ponto circular de início do diálogo na timeline.">◎</button></div></div>
+        <div class="dialogue-timeline-tools" role="toolbar" aria-label="Controles dos pinos de diálogo">
+          <button id="timelinePreviousPin" type="button" class="button quiet timeline-icon-button" title="Selecionar o diálogo anterior (J)" aria-label="Diálogo anterior"><svg viewBox="0 0 24 24"><path d="m15 18-6-6 6-6"/></svg></button>
+          <button id="timelineMovePinLeft" type="button" class="button quiet timeline-icon-button" title="Mover os pinos selecionados para a esquerda" aria-label="Mover pinos para a esquerda"><svg viewBox="0 0 24 24"><path d="M19 12H5"/><path d="m12 19-7-7 7-7"/></svg></button>
+          <label class="timeline-step-field" title="Distância movida por clique ou pela seta do teclado">Passo <input id="timelineMoveStep" type="number" min="0.01" step="0.1" value="1" aria-label="Passo de movimento em segundos">s</label>
+          <button id="timelineMovePinRight" type="button" class="button quiet timeline-icon-button" title="Mover os pinos selecionados para a direita" aria-label="Mover pinos para a direita"><svg viewBox="0 0 24 24"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg></button>
+          <button id="timelineNextPin" type="button" class="button quiet timeline-icon-button" title="Selecionar o próximo diálogo (K)" aria-label="Próximo diálogo"><svg viewBox="0 0 24 24"><path d="m9 18 6-6-6-6"/></svg></button>
+          <button id="timelineSelectAllPins" type="button" class="button quiet timeline-icon-button" title="Selecionar todos os pinos de diálogo da sessão" aria-label="Selecionar todos os pinos"><svg viewBox="0 0 24 24"><path d="m3 5 2 2 4-4"/><path d="M13 6h8"/><path d="m3 12 2 2 4-4"/><path d="M13 13h8"/><path d="m3 19 2 2 4-4"/><path d="M13 20h8"/></svg></button>
+          <span class="timeline-zoom-tools" aria-label="Zoom da timeline"><button id="timelineZoomOut" type="button" class="button quiet timeline-icon-button" title="Diminuir zoom da timeline (atalho configurável: −)" aria-label="Diminuir zoom"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/><path d="M8 11h6"/></svg></button><button id="timelineZoomFit" type="button" class="button quiet timeline-icon-button" title="Ajustar zoom para mostrar todo o trecho" aria-label="Ajustar zoom"><svg viewBox="0 0 24 24"><path d="M3 8V5a2 2 0 0 1 2-2h3"/><path d="M16 3h3a2 2 0 0 1 2 2v3"/><path d="M21 16v3a2 2 0 0 1-2 2h-3"/><path d="M8 21H5a2 2 0 0 1-2-2v-3"/><circle cx="11" cy="11" r="3"/><path d="m13.5 13.5 3 3"/></svg></button><button id="timelineZoomIn" type="button" class="button quiet timeline-icon-button" title="Aumentar zoom da timeline (atalho configurável: =)" aria-label="Aumentar zoom"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/><path d="M8 11h6"/><path d="M11 8v6"/></svg></button></span>
+        </div>
+        <div id="timelineScroll" class="timeline-scroll"><div id="timeline" class="timeline"><div id="timelineTicks" class="timeline-ticks"></div><div id="timelineTrack" class="timeline-track"><div id="timelineCursor" class="timeline-cursor"></div></div></div></div>
+        <div class="timeline-navigator" id="timelineNavigator" aria-label="Navegação pela duração completa do bloco">
+          <span class="timeline-navigator-time" id="timelineNavigatorStart">—</span>
+          <div class="timeline-navigator-track" id="timelineNavigatorTrack" title="Clique ou arraste para navegar pelo bloco completo">
+            <button type="button" class="timeline-navigator-window" id="timelineNavigatorWindow" role="slider" aria-label="Posição visível da timeline" aria-valuemin="0" aria-valuemax="1000" aria-valuenow="0" aria-valuetext="Trecho completo" disabled></button>
+          </div>
+          <span class="timeline-navigator-time" id="timelineNavigatorEnd">—</span>
+        </div>
+      </section>
+
+      <section class="panel event-list-panel" id="eventList">
+        <div class="table-heading"><h2>Lista de Eventos <small class="section-origin">(Banco de Dados)</small> <small>(trecho selecionado)</small></h2><div class="table-tools"><select id="sessionFilter" aria-label="Sessão"><option value="">Todas as sessões</option></select><select id="statusFilter" aria-label="Status"><option value="">Todos</option><option value="pending">Pendentes</option><option value="low-confidence">Baixa confiança (vermelhos)</option><option value="fine-sweep">Divergências do pente fino (amarelos)</option><option value="accepted">Confirmados</option><option value="corrected">Corrigidos</option><option value="discarded">Descartados</option></select><select id="characterFilter" aria-label="Personagem"><option value="">Todos os personagens</option></select><select id="emotionFilter" aria-label="Emoção"><option value="">Todas as emoções</option></select><input id="minConfidence" type="number" min="0" max="1" step="0.05" value="0" title="Confiança mínima"></div></div>
+        <div class="table-scroll event-table-scroll"><table id="eventTable" class="event-table"><colgroup>
+          <col data-column="select" style="width:38px"><col data-column="number" style="width:48px"><col data-column="occurrence" style="width:108px">
+          <col data-column="start" style="width:88px"><col data-column="end" style="width:88px"><col data-column="duration" style="width:64px">
+          <col data-column="text" style="width:260px"><col data-column="character" style="width:135px"><col data-column="emotion" style="width:100px">
+          <col data-column="confidence" style="width:64px"><col data-column="status" style="width:150px">
+        </colgroup><thead><tr>
+          <th data-column="select"><input id="selectAllEvents" type="checkbox" aria-label="Selecionar todos os eventos filtrados" title="Selecionar ou limpar todos os eventos visíveis com os filtros atuais"></th>
+          <th data-column="number">#</th><th data-column="occurrence">Ocorrência</th><th data-column="start">Início</th><th data-column="end">Fim</th>
+          <th data-column="duration">Duração</th><th data-column="text">Texto (OCR)</th><th data-column="character">Personagem</th>
+          <th data-column="emotion">Emoção</th><th data-column="confidence">Conf.</th><th data-column="status">Status</th>
+        </tr></thead><tbody id="eventRows"><tr><td colspan="11" class="table-empty">Os diálogos aparecerão após a primeira análise.</td></tr></tbody></table></div>
+        <div id="mergeToolbar" class="merge-toolbar hidden"><span id="mergeCount">0 selecionados</span><button id="bulkAcceptButton" type="button" class="button confirm" title="Confirma todos os eventos selecionados, como o botão Confirmar da revisão individual.">Confirmar selecionados</button><button id="mergeButton" type="button" class="button quiet">Unir selecionados</button><button id="bulkRemoveButton" type="button" class="button discard" title="Marca os eventos selecionados como descartados; os registros e imagens ficam preservados e podem ser revistos pelo filtro Descartados.">Remover selecionados</button></div>
+      </section>
+    </section>
+
+    <aside class="right-column">
+      <section class="panel processing-panel" id="processing">
+        <div class="panel-title"><h2>Segmento e Processamento <small class="section-origin">(Processamento)</small></h2><span id="segmentDurationLabel">Melhor qualidade</span></div>
+        <div class="progress-line"><span id="progressBar"></span></div>
+        <div id="downloadStatus" class="download-status" role="status" aria-live="polite">Aguardando início do download.</div>
+        <button id="fineSweepStartButton" type="button" class="button quiet hidden" title="Reler visualmente o bloco concluído e marcar divergências em amarelo sem alterar textos salvos.">◉ Passar pente fino neste bloco</button>
+        <div id="fineSweepStatus" class="fine-sweep-status hidden" role="status" aria-live="polite"><b id="fineSweepHeadline">Pente fino</b><span id="fineSweepProgress">Aguardando</span><div id="fineSweepFindings" class="fine-sweep-findings"></div></div>
+        <div id="pipelineSteps" class="pipeline-steps">
+          <div data-step="capture"><i>✓</i><span>Download do vídeo</span><small>Aguardando</small></div>
+          <div data-step="frames"><i>◌</i><span>Processando frames (8 FPS)</span><small>Aguardando</small></div>
+          <div data-step="detect"><i>◌</i><span>Detectando regiões de texto</span><small>Aguardando</small></div>
+          <div data-step="ocr"><i>◌</i><span>Executando OCR</span><small>Aguardando</small></div>
+          <div data-step="events"><i>◌</i><span>Gerando eventos</span><small>Aguardando</small></div>
+          <div data-step="done"><i>◌</i><span>Resultado</span><small>Aguardando</small></div>
+        </div>
+      </section>
+
+      <section class="panel event-detail-panel">
+        <div class="panel-title"><h2>Detalhes do Evento Selecionado</h2><span id="selectedEventLabel">Nenhum evento</span></div>
+        <div class="detail-tabs"><button class="detail-tab active" data-detail-tab="images">Imagens</button><button class="detail-tab" data-detail-tab="text">OCR e Texto</button><button class="detail-tab" data-detail-tab="metadata">Metadados</button></div>
+        <div id="detailImages" class="detail-content active"><div id="heroWrap" class="hero-image-wrap empty"><img id="detailHero" alt="Imagem do evento selecionado" hidden><span id="heroCaption">Selecione um evento</span></div><div id="detailThumbs" class="detail-thumbs"></div></div>
+        <div id="detailText" class="detail-content">
+          <label><span id="detailOriginalLabel">OCR original</span><textarea id="detailOriginal" readonly></textarea></label>
+          <label>Texto processado / corrigido<textarea id="detailCorrected" readonly></textarea></label>
+          <label>Última leitura OCR (bruta)<textarea id="detailLatestRaw" readonly placeholder="Nenhuma nova leitura feita."></textarea></label>
+          <label>Última leitura OCR (processada)<textarea id="detailLatestProcessed" readonly placeholder="Nenhuma nova leitura feita."></textarea></label>
+          <div class="detail-facts"><span id="detailConfidenceLabel">Confiança OCR</span><b id="detailConfidence">—</b><span>Nova leitura</span><b id="detailLatestOcrInfo">—</b><span>Normalizado</span><b id="detailNormalized">—</b></div>
+        </div>        <div id="detailMetadata" class="detail-content"><div class="detail-facts"><span>Event ID</span><b id="detailId">—</b><span>source_time</span><b id="detailTimes">—</b><span>Origem</span><b id="detailOrigin">—</b><span>Sincronização</span><b id="detailTiming">—</b><span>Hash texto</span><b id="detailHash">—</b><span>Estado</span><b id="detailReviewState">—</b></div></div>
+      </section>
+    </aside>
+
+    <section class="dock-bottom" id="dockBottom"><section class="panel review-dock" id="review">
+      <div class="review-dock-title"><div><h2>Revisão e Edição <small class="section-origin">(Revisão)</small></h2><span id="reviewSelectionHint">Selecione um evento na tabela ou timeline</span></div><div class="review-confidence"><span id="reviewConfidenceCaption">Confiança OCR</span> <b id="reviewConfidence">—</b></div></div>
+      <div class="review-fields"><label><span id="reviewOriginalLabel">Texto Original (OCR)</span><textarea id="reviewOriginal" readonly></textarea></label><label>Texto Processado / Corrigido<textarea id="reviewCorrected" placeholder="Corrija o texto reconhecido…"></textarea></label><label>Personagem (opcional)<span class="character-combobox" id="reviewCharacterCombobox"><input id="reviewCharacter" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="characterOptions" aria-haspopup="listbox" autocomplete="off" placeholder="Digite ou selecione"><button id="reviewCharacterToggle" class="character-combobox-toggle" type="button" aria-label="Mostrar personagens" aria-expanded="false" title="Mostrar personagens">▾</button><div id="characterOptions" class="character-options" popover="manual" role="listbox" aria-label="Personagens da ROI"></div></span></label><label>Emoção (opcional)<select id="reviewEmotion"><option value="">Normal</option><option>Normal</option><option>Alegre</option><option>Triste</option><option>Raiva</option><option>Medo</option><option>Surpresa</option></select></label><label class="time-edit">Início (s)<input id="reviewStart" type="number" min="0" step="0.001"></label><label class="time-edit">Fim (s)<input id="reviewEnd" type="number" min="0" step="0.001"></label></div>
+      <div class="review-actions"><button id="acceptButton" class="button confirm" type="button" disabled>✓ Confirmar</button><button id="correctButton" class="button action-blue" type="button" disabled>✎ Corrigir Texto</button><button id="adjustButton" class="button action-purple" type="button" disabled>☷ Ajustar Tempos</button><button id="mergePrevious" class="button action-neutral" type="button" disabled>↶ Juntar com  nterior</button><button id="mergeNext" class="button action-neutral" type="button" disabled>↷ Juntar com Próximo</button><button id="splitButton" class="button action-neutral" type="button" disabled>✂ Dividir</button><button id="replaceButton" class="button action-neutral" type="button">↻ Replace</button><button id="discardButton" class="button discard" type="button" disabled>▤ Descartar</button></div>
+    </section></section>
+
+    <div class="dock-float-layer" id="dockFloatLayer" aria-label="Painéis flutuantes"></div>
+
+    <button type="button" class="grid-splitter vertical" data-resize="app-columns-left" data-container="#appGrid" data-axis="x" data-before=".left-column" data-after=".center-column" data-tracks=".left-column|.center-column|.right-column" data-vars="--track-left|--track-center|--track-right" data-min-before="290" data-min-after="520" aria-label="Redimensionar coluna Fonte de Vídeo" title="Arraste para ajustar a largura"><span aria-hidden="true">↔</span></button>
+    <button type="button" class="grid-splitter vertical" data-resize="app-columns-right" data-container="#appGrid" data-axis="x" data-before=".center-column" data-after=".right-column" data-tracks=".left-column|.center-column|.right-column" data-vars="--track-left|--track-center|--track-right" data-min-before="520" data-min-after="310" aria-label="Redimensionar coluna de detalhes" title="Arraste para ajustar a largura"><span aria-hidden="true">↔</span></button>
+    <button type="button" class="grid-splitter horizontal" data-resize="app-review-row" data-container="#appGrid" data-axis="y" data-before="#capture" data-after="#dockBottom" data-tracks="#capture|#dockBottom" data-vars="--track-main|--track-review" data-min-before="390" data-min-after="145" aria-label="Redimensionar área de revisão" title="Arraste para ajustar a altura"><span aria-hidden="true">↕</span></button>
+    <button type="button" class="grid-splitter horizontal" data-resize="center-overview-row" data-container=".center-column" data-axis="y" data-before="#videoOverview" data-after=".preview-panel" data-tracks="#videoOverview|.preview-panel|.timeline-panel|.event-list-panel" data-vars="--track-overview|--track-preview|--track-timeline|--track-events" data-min-before="64" data-min-after="220" aria-label="Redimensionar progresso geral e pré-visualização" title="Arraste para ajustar a altura"><span aria-hidden="true">↕</span></button>
+    <button type="button" class="grid-splitter horizontal" data-resize="center-preview-row" data-container=".center-column" data-axis="y" data-before=".preview-panel" data-after=".timeline-panel" data-tracks="#videoOverview|.preview-panel|.timeline-panel|.event-list-panel" data-vars="--track-overview|--track-preview|--track-timeline|--track-events" data-min-before="220" data-min-after="125" aria-label="Redimensionar pré-visualização e timeline" title="Arraste para ajustar a altura"><span aria-hidden="true">↕</span></button>
+    <button type="button" class="grid-splitter horizontal" data-resize="center-events-row" data-container=".center-column" data-axis="y" data-before=".timeline-panel" data-after=".event-list-panel" data-tracks="#videoOverview|.preview-panel|.timeline-panel|.event-list-panel" data-vars="--track-overview|--track-preview|--track-timeline|--track-events" data-min-before="125" data-min-after="190" aria-label="Redimensionar timeline e Lista de Eventos" title="Arraste para ajustar a altura"><span aria-hidden="true">↕</span></button>
+    <button type="button" class="grid-splitter horizontal" data-resize="right-details-row" data-container=".right-column" data-axis="y" data-before=".processing-panel" data-after=".event-detail-panel" data-tracks=".processing-panel|.event-detail-panel" data-vars="--track-processing|--track-details" data-min-before="220" data-min-after="300" aria-label="Redimensionar processamento e detalhes do evento" title="Arraste para ajustar a altura"><span aria-hidden="true">↕</span></button>
+  </main>
+  <main class="dubbing-view hidden" id="dubbingView" data-layout-scope="dubbing" aria-label="Produção de dublagem">
+    <div class="dub-grid" id="dubGrid">
+      <div class="dock-zone dub-dock-zone left-column" id="dubDockLeft">
+      <section class="panel dub-characters-panel" id="dubCharactersPanel" aria-label="Personagens">
+        <div class="panel-title"><div><span class="dub-icon characters-icon">♟</span><h2>Personagens</h2></div><button id="dubNewCharacter" type="button" class="button quiet" title="Abrir o cadastro de personagens da ROI na tela Captura">Gerenciar ROI</button></div>
+        <label class="dub-search"><span>⌕</span><input id="dubCharacterSearch" type="search" placeholder="Buscar personagem…" autocomplete="off"></label>
+        <div class="dub-character-detail" id="dubCharacterDetail">
+          <div class="dub-empty-mini">Selecione um personagem para ver os perfis e as referências.</div>
+        </div>
+        <div id="dubCharacterList" class="dub-character-list" role="listbox" aria-label="Lista de personagens"></div>
+      </section>
+
+      </div>
+      <div class="dock-zone dub-dock-zone center-column" id="dubDockCenter">
+      <section class="panel dub-lines-panel" id="dubLinesPanel" aria-label="Falas e ocorrências">
+        <div class="dub-panel-heading"><div><div class="panel-kicker">ROTEIRO DO PROJETO</div><h2>Falas e Ocorrências</h2></div><span id="dubLineCount" class="dub-count-badge">0</span></div>
+        <div class="dub-metrics-row">
+          <div><span>Elegíveis</span><b id="dubMetricEligible">0</b></div>
+          <div><span>Sem take</span><b id="dubMetricWithoutTake">0</b></div>
+          <div><span>Em revisão</span><b id="dubMetricReview">0</b></div>
+          <div><span>Conflitos</span><b id="dubMetricConflicts">0</b></div>
+        </div>
+        <div class="dub-filters">
+          <label><span class="sr-only">Filtrar falas por personagem</span><select id="dubCharacterFilter"><option value="">Todos os personagens</option></select></label>
+          <label><span class="sr-only">Filtrar estado das falas</span><select id="dubStatusFilter"><option value="not-discarded">Todos exceto descartados</option><option value="eligible">Elegíveis</option><option value="without-take">Sem take</option><option value="pending">Aguardando revisão</option><option value="review">Em revisão de áudio</option><option value="approved">Aprovadas</option><option value="error">Erro</option><option value="discarded">Descartadas</option></select></label>
+          <label class="dub-list-search"><span>⌕</span><input id="dubLineSearch" type="search" placeholder="Buscar fala, personagem ou ID…" autocomplete="off"></label>
+          <button id="dubClearFilters" type="button" class="button quiet" title="Limpar filtros">Limpar</button>
+        </div>
+        <div class="dub-table-scroll">
+          <table class="dub-lines-table"><thead><tr><th><label class="dub-select-all-target" title="Selecionar todas as falas exibidas pelos filtros atuais"><input id="dubSelectAll" type="checkbox" aria-label="Selecionar todas as falas visíveis"><span>#</span></label></th><th>Ocorrência</th><th>Tempo</th><th>Personagem</th><th>Fala para dublagem</th><th>Alvo</th><th>Status / take</th></tr></thead><tbody id="dubLinesBody"><tr><td colspan="7" class="dub-table-empty">Carregando roteiro…</td></tr></tbody></table>
+        </div>
+        <div class="dub-list-footer"><span id="dubListFooter">O roteiro mantém evento, ocorrência e tempo de captura separados.</span><button id="dubManualOverrideHint" type="button" class="text-action" title="Libera uma fala ainda não aprovada, uma por vez">ⓘ Revisão manual</button></div>
+      </section>
+      </div>
+      <div class="dock-zone dub-dock-zone extra-column" id="dubDockExtra" aria-label="Quarta coluna. Arraste um card aqui para reorganizar a tela.">
+        <section class="panel dub-video-overview video-overview-panel" id="dubVideoOverview" aria-label="Progresso geral da dublagem por bloco e resumo da produção">
+          <div class="panel-title overview-title">
+            <div class="overview-title-main"><h2>Progresso da Dublagem</h2></div>
+            <div class="dub-project-mark" aria-label="Projeto REPLACED">
+              <span class="dub-project-icon">DS</span>
+              <div><small>PROJETO</small><strong>REPLACED</strong></div>
+              <span id="dubModelBadge" class="dub-status-pill waiting">OmniVoice · verificando</span>
+              <button id="dubProviderButton" type="button" class="button quiet">Iniciar provider</button>
+            </div>
+            <span id="dubOverviewCurrentLabel" class="overview-current">Selecione uma sessão para carregar os blocos</span>
+            <div class="overview-actions">
+              <span id="dubOverviewProgressLabel">—</span>
+              <label class="dub-session-picker"><span>Sessão / bloco</span><select id="dubSessionFilter" aria-label="Sessão para revisão de dublagem"></select></label>
+              <div class="dub-global-actions">
+                <button id="dubRefresh" type="button" class="button quiet" title="Atualizar a lista e o estado do provider">↻ Atualizar</button>
+                <button id="dubExportJson" type="button" class="button quiet" title="Exportar roteiro rastreável">⇩ Roteiro JSON</button>
+                <button id="dubExportCsv" type="button" class="button quiet" title="Exportar roteiro em planilha">⇩ CSV</button>
+              </div>
+            </div>
+          </div>
+          <div class="overview-ruler" id="dubOverviewRuler" aria-hidden="true"></div>
+          <div class="overview-track" id="dubOverviewTrack" role="group" aria-label="Blocos do vídeo e andamento das dublagens"><div class="overview-blocks" id="dubOverviewBlocks"></div><div class="overview-cursor" id="dubOverviewCursor" hidden></div></div>
+          <div class="dub-summary" aria-label="Resumo da produção">
+            <div class="dub-stat-card"><span>Falas elegíveis</span><b id="dubStatEligible">—</b><small>Aprovadas na Fase 1</small></div>
+            <div class="dub-stat-card"><span>Geradas</span><b id="dubStatGenerated">—</b><small>takes prontos</small></div>
+            <div class="dub-stat-card"><span>Em revisão</span><b id="dubStatReview">—</b><small>aguardando decisão</small></div>
+            <div class="dub-stat-card"><span>Aprovadas</span><b id="dubStatApproved">—</b><small>um take por ocorrência</small></div>
+            <div class="dub-stat-card"><span>Na fila / erros</span><b><span id="dubStatQueued">—</span><i>/</i><span id="dubStatErrors">—</span></b><small>tentativas preservadas</small></div>
+          </div>
+        </section>
+      </div>
+      <div class="dock-zone dub-dock-zone timeline-row" id="dubDockTimeline">
+      <section class="panel dub-timeline-panel" id="dubTimelinePanel" aria-label="Timeline da fala e vídeo de referência">
+        <div class="panel-title"><div><span class="dub-icon timeline-icon">▤</span><h2>Timeline da fala</h2></div><div class="dub-timeline-heading-actions"><label class="dub-follow-toggle" title="Seleciona cada fala ao chegar nela e reproduz o take disponível junto com o vídeo"><input id="dubAutoFollowTimeline" type="checkbox"><span>Auto falas + takes</span></label><span id="dubPreviewClock" class="mono muted">00:00 / —</span></div></div>
+        <div class="dub-timeline-content">
+          <div class="dub-video-wrap"><video id="dubPreviewVideo" muted playsinline preload="metadata" controls></video><div id="dubVideoPlaceholder" class="dub-video-placeholder"><span>▶</span><b>Selecione uma ocorrência</b><small>Vídeo de evidência silenciado durante a prévia.</small></div></div>
+          <div class="dub-timeline-tools" role="toolbar" aria-label="Controles dos pinos de diálogo">
+            <button id="dubTimelinePreviousPin" type="button" class="button quiet timeline-icon-button" title="Selecionar e ir ao diálogo anterior (J)" aria-label="Diálogo anterior"><svg viewBox="0 0 24 24"><path d="m15 18-6-6 6-6"/></svg></button>
+            <button id="dubTimelineMoveLeft" type="button" class="button quiet timeline-icon-button" title="Mover os pinos selecionados para a esquerda" aria-label="Mover pinos para a esquerda"><svg viewBox="0 0 24 24"><path d="M19 12H5"/><path d="m12 19-7-7 7-7"/></svg></button>
+            <label class="timeline-step-field" title="Distância movida por clique ou pela seta do teclado">Passo <input id="dubTimelineMoveStep" type="number" min="0.01" step="0.1" value="1" aria-label="Passo de movimento em segundos">s</label>
+            <button id="dubTimelineMoveRight" type="button" class="button quiet timeline-icon-button" title="Mover os pinos selecionados para a direita" aria-label="Mover pinos para a direita"><svg viewBox="0 0 24 24"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg></button>
+            <button id="dubTimelineNextPin" type="button" class="button quiet timeline-icon-button" title="Selecionar e ir ao próximo diálogo (K)" aria-label="Próximo diálogo"><svg viewBox="0 0 24 24"><path d="m9 18 6-6-6-6"/></svg></button>
+            <button id="dubTimelineSelectAll" type="button" class="button quiet timeline-icon-button" title="Selecionar todos os pinos da sessão" aria-label="Selecionar todos os pinos"><svg viewBox="0 0 24 24"><path d="m3 5 2 2 4-4"/><path d="M13 6h8"/><path d="m3 12 2 2 4-4"/><path d="M13 13h8"/><path d="m3 19 2 2 4-4"/><path d="M13 20h8"/></svg></button>
+            <span class="timeline-zoom-tools" aria-label="Zoom da timeline"><button id="dubTimelineZoomOut" type="button" class="button quiet timeline-icon-button" title="Diminuir zoom (−)" aria-label="Diminuir zoom"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/><path d="M8 11h6"/></svg></button><button id="dubTimelineZoomFit" type="button" class="button quiet timeline-icon-button" title="Ajustar zoom para mostrar todo o trecho" aria-label="Ajustar zoom"><svg viewBox="0 0 24 24"><path d="M3 8V5a2 2 0 0 1 2-2h3"/><path d="M16 3h3a2 2 0 0 1 2 2v3"/><path d="M21 16v3a2 2 0 0 1-2 2h-3"/><path d="M8 21H5a2 2 0 0 1-2-2v-3"/><circle cx="11" cy="11" r="3"/><path d="m13.5 13.5 3 3"/></svg></button><button id="dubTimelineZoomIn" type="button" class="button quiet timeline-icon-button" title="Aumentar zoom (=)" aria-label="Aumentar zoom"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/><path d="M8 11h6"/><path d="M11 8v6"/></svg></button></span>
+          </div>
+          <div class="dub-dialogue-timeline" id="dubDialogueTimeline" aria-label="Timeline de diálogos"><div class="dub-dialogue-ticks" id="dubDialogueTicks"></div><div class="dub-dialogue-track" id="dubDialogueTrack" tabindex="0" role="group" aria-label="Pinos dos diálogos; arraste no espaço vazio para selecionar vários"><div class="dub-dialogue-cursor" id="dubDialogueCursor"></div></div></div>
+          <div class="dub-timeline-meta" aria-hidden="true"><span id="dubTimeStart">—</span><span class="dub-target-window"><i id="dubTargetWindow"></i></span><span id="dubTimeEnd">—</span></div>
+        </div>
+      </section>
+      <section class="panel dub-sync-panel" id="dubSyncPanel" aria-label="Prévia sincronizada do take">
+        <div class="panel-title"><div><span class="dub-icon audio-icon">♫</span><h2>Prévia sincronizada</h2></div></div>
+        <div class="dub-sync-content">
+          <div class="dub-audio-preview"><div class="dub-waveform"><canvas id="dubWaveformCanvas" width="520" height="62" aria-label="Forma de onda do take selecionado"></canvas><div id="dubWaveformEmpty" class="dub-waveform-empty">Waveform do take</div></div><div class="dub-sync-controls"><button id="dubPlaySynced" type="button" class="button primary" disabled>▶ Reproduzir take + vídeo</button><button id="dubAudioOnly" type="button" class="button quiet" disabled>♫ Só áudio</button><span id="dubDurationDelta" class="dub-delta">Alvo —</span></div><audio id="dubPreviewAudio" preload="metadata"></audio></div>
+        </div>
+      </section>
+      </div>
+      <div class="dock-zone dub-dock-zone right-column" id="dubDockRight">
+      <section class="panel dub-studio-panel" id="dubStudioPanel" aria-label="Take Studio">
+        <div class="panel-title"><div><span class="dub-icon audio-icon">♫</span><h2>Take Studio</h2></div><div class="dub-studio-heading-right"><span id="dubSelectedOccurrence" class="mono muted">Selecione uma fala</span><span id="dubSelectedEditorial" class="dub-status-pill waiting">—</span></div></div>
+        <div class="dub-studio-body">
+          <section class="dub-studio-section dub-studio-script">
+            <h3><b>1.</b>Fala selecionada</h3>
+            <div class="dub-two-fields"><label>Texto original (OCR)<textarea id="dubSourceText" readonly rows="2" placeholder="Texto capturado pela Fase 1"></textarea></label><label>Texto para dublagem<textarea id="dubText" maxlength="4000" rows="2" placeholder="Texto revisado para esta fala"></textarea></label></div>
+            <div class="dub-three-fields"><label>Personagem<select id="dubStudioCharacter"><option value="">Sem personagem associado</option></select></label><label>Emoção<select id="dubEmotion"><option value="normal">Normal</option><option value="tension">Tensão</option><option value="fear">Medo</option><option value="angry">Raiva</option><option value="sad">Tristeza</option><option value="joy">Alegria</option><option value="surprise">Surpresa</option></select></label><label>Intensidade <output id="dubIntensityValue">70%</output><input id="dubIntensity" type="range" min="0" max="1" step="0.01" value="0.7"></label></div>
+            <div id="dubSourceEvidence" class="dub-source-evidence">Origem da fala e confiança aparecerão aqui.</div>
+            <div id="dubConflictNotice" class="dub-conflict-notice hidden" role="status"></div>
+          </section>
+          <section class="dub-studio-section dub-studio-voice">
+            <div class="dub-section-title-row"><h3><b>2.</b>Perfil vocal</h3><span class="dub-local-badge"><i></i> OmniVoice local</span></div>
+            <div class="dub-profile-toolbar">
+              <label>Perfil ativo<select id="dubVoiceSelect"><option value="">Selecione ou crie um perfil</option></select></label>
+              <div class="dub-profile-actions"><button id="dubNewVoice" type="button" class="button purple-action">＋ Novo perfil</button><button id="dubEditVoice" type="button" class="button quiet" disabled>Editar</button><button id="dubToggleVoice" type="button" class="button quiet" disabled>Inativar</button><button id="dubDeleteVoice" type="button" class="button quiet" disabled title="Remove perfis sem histórico; perfis usados ficam inativos">Remover</button></div>
+            </div>
+            <div class="dub-profile-name-row"><label>Nome do perfil<input id="dubProfileName" maxlength="120" placeholder="Ex.: RED PT-BR"></label><label>Idioma<select id="dubProfileLanguage"><option value="pt-BR">Português brasileiro · pt-BR</option></select></label><button id="dubBrowseModels" type="button" class="button quiet">▤ Ver modelos de voz</button></div>
+            <div class="dub-profile-state"><span id="dubVoiceReadyDot" class="state-dot failed"></span><span id="dubVoiceReadyText">Crie um perfil e associe um áudio autorizado.</span><span id="dubProfileOwner" class="dub-profile-owner">Personagem: —</span></div>
+            <div class="dub-studio-subheading"><strong>Fonte da voz</strong><span>Escolha como este perfil será gerado</span></div>
+            <div class="dub-profile-mode-row">
+              <fieldset class="dub-voice-source-picker" role="radiogroup" aria-label="Fonte da voz">
+                <legend>Fonte da voz</legend>
+                <label><input type="radio" name="dubVoiceSource" value="design"><span>Gerar voz</span></label>
+                <label><input type="radio" name="dubVoiceSource" value="clone"><span id="dubCloneSourceLabel">Clonar voz com áudio autorizado</span></label>
+              </fieldset>
+              <select id="dubLocalProfileMode" class="hidden" aria-hidden="true" tabindex="-1"><option value="clone">Clonar voz</option><option value="design">Gerar voz</option></select>
+              <span id="dubProfileModeHint">Escolha a fonte para este perfil vocal.</span>
+            </div>
+            <div class="dub-clone-card" id="dubCloneCard">
+              <div class="dub-clone-copy"><b>Clonar uma voz autorizada</b><small>O áudio fica no DubSync local. Prefira uma fala limpa de 3 a 10 s.</small></div>
+              <div id="dubRoiAudioSource" class="dub-roi-audio-source hidden"><b>Áudio de referência do personagem na Captura</b><span id="dubRoiAudioSourceName"></span><audio id="dubRoiAudioPlayer" controls preload="metadata" aria-label="Ouvir áudio anexado ao personagem"></audio><div class="dub-roi-audio-actions"><button id="dubReplaceRoiAudio" type="button" class="button quiet">Trocar áudio no ROI</button><input id="dubReplaceRoiAudioFile" type="file" accept="audio/wav,audio/mpeg,.wav,.mp3" hidden><button id="dubUseRoiReference" type="button" class="button quiet hidden">Usar este áudio como voz do perfil</button></div><small id="dubRoiAudioSourceNote">Trocar o arquivo aqui também atualiza o áudio anexado ao personagem na Captura.</small></div>
+              <div id="dubReferenceUpload" class="dub-reference-upload"><label class="dub-upload-label" for="dubReferenceFile">＋ Escolher arquivo <small>WAV ou MP3 · até 50 MB</small></label><input id="dubReferenceFile" type="file" accept="audio/wav,audio/mpeg,.wav,.mp3"></div><button id="dubRemoveReference" type="button" class="button quiet" disabled>Remover áudio</button>
+              <label class="dub-reference-transcript">Texto falado na amostra <small>Opcional; ajuda a preparar a referência</small><textarea id="dubProfileReferenceText" rows="2" maxlength="4000" placeholder="Transcreva o trecho anexado"></textarea></label><div id="dubProfileReferenceStatus" class="dub-reference-quality">Ainda não há áudio de referência neste perfil.</div><audio id="dubReferencePreview" controls class="dub-reference-preview hidden"></audio>
+            </div>
+            <div id="dubDesignVoiceCard" class="dub-design-voice-card hidden"><div class="dub-design-heading"><b>Desenho da voz · PT-BR</b><button id="dubClearVoiceModel" type="button" class="button quiet hidden">Desmarcar modelo</button></div><div class="dub-design-grid"><label>Gênero<select id="dubDesignGender"><option value="">Automático</option><option value="male">Masculino</option><option value="female">Feminino</option></select></label><label>Idade<select id="dubDesignAge"><option value="">Automático</option><option value="child">Criança</option><option value="teenager">Adolescente</option><option value="young adult">Jovem adulto</option><option value="middle-aged">Meia-idade</option><option value="elderly">Idoso</option></select></label><label>Pitch<select id="dubDesignPitch"><option value="">Automático</option><option value="very low pitch">Muito grave</option><option value="low pitch">Grave</option><option value="moderate pitch">Moderado</option><option value="high pitch">Agudo</option><option value="very high pitch">Muito agudo</option></select></label><label>Estilo<select id="dubDesignStyle"><option value="">Natural</option><option value="whisper">Sussurro</option></select></label></div><div class="dub-design-freeform"><label>Ritmo de fala<input id="dubDesignRhythm" maxlength="160" placeholder="Ex.: calmo, pausado"></label><label>Textura vocal<input id="dubDesignTexture" maxlength="160" placeholder="Ex.: rouca, aveludada, firme"></label><label>Descrição adicional<textarea id="dubDesignDescription" maxlength="1000" rows="2" placeholder="Descreva a identidade vocal que quer criar"></textarea></label></div><p class="dub-design-note">A descrição é enviada como instrução de voz. O desenho pode variar em PT-BR; escolha uma prévia como voz oficial para manter a identidade nas falas.</p><div class="dub-candidate-toolbar"><span>Gere variações, ouça e escolha uma voz oficial</span><button id="dubGenerateCandidates" type="button" class="button purple-action" disabled>✦ Gerar 3 candidatos</button></div><div id="dubCandidateList" class="dub-candidate-list" aria-live="polite"></div></div>
+            <div class="dub-studio-subheading"><strong>Ajustes de geração</strong><span>Valores usados nos próximos takes deste perfil</span></div>
+            <div class="dub-settings-grid">
+              <label>Velocidade <span class="dub-field-note">0,5×–2×</span><input id="dubSpeed" type="number" min="0.5" max="2" step="0.05" value="1.0"></label>
+              <label>Duração alvo <span class="dub-field-note">vazio = automática; substitui velocidade</span><input id="dubDuration" type="number" min="0.1" max="60" step="0.05" placeholder="Auto"></label>
+              <label class="dub-check-setting"><input id="dubDenoise" type="checkbox" checked>Fala mais limpa (denoise)</label>
+              <label>Etapas<select id="dubNumStep"><option value="16">16 · mais rápido</option><option value="32" selected>32 · mais qualidade</option></select></label>
+            </div>
+            <details class="dub-advanced-settings"><summary>Parâmetros de geração avançados da API</summary><div class="dub-settings-grid dub-settings-advanced">
+              <label>Guidance scale<input id="dubGuidanceScale" type="number" min="0" max="10" step="0.1" value="2"></label><label>T shift<input id="dubTShift" type="number" min="0" max="2" step="0.01" value="0.1"></label><label>Position temperature<input id="dubPositionTemperature" type="number" min="0" max="10" step="0.1" value="5"></label><label>Class temperature<input id="dubClassTemperature" type="number" min="0" max="10" step="0.1" value="0"></label><label>Layer penalty factor<input id="dubLayerPenalty" type="number" min="0" max="10" step="0.1" value="5"></label>
+              <label class="dub-check-setting"><input id="dubNormalizeText" type="checkbox">Normalizar números no texto</label><label class="dub-check-setting"><input id="dubPreprocessPrompt" type="checkbox" checked>Preparar amostra de voz</label><label class="dub-check-setting"><input id="dubPostprocessOutput" type="checkbox" checked>Remover silêncios longos</label><label>Silêncio por lado (s)<input id="dubPadDuration" type="number" min="0" max="10" step="0.01" value="0.1"></label><label>Fade de entrada/saída (s)<input id="dubFadeDuration" type="number" min="0" max="10" step="0.01" value="0.1"></label><label>Bloco de áudio longo (s)<input id="dubAudioChunkDuration" type="number" min="0.5" max="120" step="0.5" value="15"></label><label>Iniciar divisão acima de (s)<input id="dubAudioChunkThreshold" type="number" min="0.5" max="600" step="0.5" value="30"></label>
+            </div></details>
+            <div class="dub-studio-subheading"><strong>Teste do perfil</strong><span>Ouça um exemplo antes de gerar o take</span></div>
+            <div class="dub-profile-preview"><label>Texto de teste<textarea id="dubPreviewText" maxlength="1000" rows="2" placeholder="Use uma frase de 3 a 10 segundos para comparar as vozes"></textarea></label><button id="dubTestProfile" type="button" class="button quiet" disabled>▶ Testar voz</button><audio id="dubProfilePreviewAudio" controls class="hidden"></audio></div>
+            <div class="dub-profile-save-row"><label class="dub-consent-inline"><input id="dubProfileAuthorized" type="checkbox">Confirmo autorização para usar esta voz e revisei a licença local do modelo.</label><button id="dubSaveProfile" type="button" class="button primary" disabled>Salvar perfil</button></div>
+          </section>
+          <section class="dub-studio-section dub-studio-direction">
+            <h3><b>3.</b>Direção desta fala</h3>
+            <div class="dub-advanced-row"><label>Direção de interpretação para esta fala<textarea id="dubInstruction" rows="2" maxlength="2000" placeholder="Ex.: tom tenso e urgente, com intensidade moderada"></textarea></label><label>Preset de interpretação<select id="dubPresetSelect"><option value="">Aplicar sugestão pela emoção</option></select></label><button id="dubSavePreset" type="button" class="button quiet" title="Salvar a instrução atual como preset">Salvar preset</button></div><button id="dubConfigureVoice" class="hidden" type="button" tabindex="-1" aria-hidden="true">Configurar perfil</button>
+            <label class="dub-manual-override"><input id="dubManualOverride" type="checkbox">Liberar manualmente mesmo sem aprovação editorial</label>
+          </section>
+          <div class="dub-studio-actions"><span id="dubLineSaveStatus" class="dub-autosave-status saved" role="status" aria-live="polite">Salvo automaticamente</span><button id="dubGenerateTake" type="button" class="button purple-action" disabled>✦ Gerar take</button></div>
+          <section class="dub-takes-inline"><div class="dub-section-title-row"><h3><b>4.</b>Takes desta ocorrência</h3><span id="dubTakeCount" class="dub-count-badge">0 takes</span></div><div id="dubTakeList" class="dub-take-list"><div class="dub-empty-mini">Os takes gerados e suas versões aparecerão aqui.</div></div></section>
+        </div>
+      </section>
+      <section class="panel dub-production-panel" id="dubProductionPanel" aria-label="Produção e fila">
+        <div class="panel-title"><div><span class="dub-icon production-icon">⚙</span><h2>Produção do bloco</h2></div><span id="dubQueueState" class="dub-status-pill waiting">Parada</span></div>
+        <div class="dub-production-body"><div class="dub-production-stats"><div><span>Concluídas</span><b id="dubBatchGenerated">0</b></div><div><span>Erros</span><b class="bad" id="dubBatchErrors">0</b></div><div><span>Aguardando</span><b id="dubBatchQueued">0</b></div><div><span>Em geração</span><b id="dubBatchReview">0</b></div></div><div class="dub-progress"><span id="dubBatchProgress"></span></div><div class="dub-queue-meta"><span id="dubQueuePercent">Nenhum lote recente</span><span id="dubQueueWorker">1 worker · sequencial</span></div><div class="dub-batch-actions"><span id="dubSelectedCount">0 falas selecionadas</span><div><button id="dubGenerateSelected" type="button" class="button quiet">Gerar selecionadas</button><button id="dubGenerateCharacter" type="button" class="button quiet" title="Gera as falas do personagem apenas no bloco selecionado">Personagem neste bloco</button><button id="dubGenerateBlock" type="button" class="button primary">Gerar bloco</button><button id="dubGenerateVideoCharacter" type="button" class="button quiet" title="Gera em sequência as falas elegíveis do personagem em todos os blocos já capturados deste vídeo">Personagem · vídeo todo</button><button id="dubGeneratePending" type="button" class="button quiet">Gerar pendentes</button></div></div><div id="dubQueueList" class="dub-queue-list"></div><div class="dub-production-actions"><button id="dubPauseQueue" type="button" class="button quiet">Ⅱ Pausar fila</button><button id="dubRetryErrors" type="button" class="button quiet">↻ Repetir erros</button><button id="dubCancelQueue" type="button" class="button danger">× Cancelar pendentes</button></div></div>
+      </section>
+      </div>
+        <button type="button" role="separator" aria-orientation="vertical" class="dock-divider horizontal dub-column-divider left" id="dubDockLeftDivider" aria-label="Redimensionar Personagens e Falas" title="Arraste para ajustar a largura de Personagens e Falas"><span aria-hidden="true">↔</span></button>
+        <button type="button" role="separator" aria-orientation="vertical" class="dock-divider horizontal dub-column-divider center" id="dubDockCenterDivider" aria-label="Redimensionar Falas e a quarta coluna" title="Arraste para ajustar a largura das Falas e da quarta coluna"><span aria-hidden="true">↔</span></button>
+        <button type="button" role="separator" aria-orientation="vertical" class="dock-divider horizontal dub-column-divider right" id="dubDockRightDivider" aria-label="Redimensionar a quarta coluna e o Take Studio" title="Arraste para ajustar a largura da quarta coluna e do Take Studio"><span aria-hidden="true">↔</span></button>
+      <button type="button" class="dock-divider vertical dub-row-divider" id="dubDockRowDivider" aria-label="Redimensionar a área de Personagens e falas em relação à Timeline" aria-valuemin="30" aria-valuemax="70" aria-valuenow="52" title="Arraste para ajustar a altura da Timeline"><span aria-hidden="true">↕</span></button>
+      <div class="dock-zone dock-float-layer" id="dubDockFloatLayer" aria-label="Painéis flutuantes da Dublagem"></div>
+    </div>
+    <div class="dub-shortcut-hint"><span>Atalhos desta tela</span><kbd>Alt</kbd>+<kbd>Shift</kbd>+<kbd>D</kbd> abrir Dublagem <i>·</i> <kbd>Ctrl</kbd>+<kbd>Enter</kbd> gerar o take selecionado</div>
+  </main>
+
+  <dialog id="dubCharacterActionsDialog" class="dub-dialog dub-character-actions-dialog" aria-labelledby="dubCharacterActionsTitle">
+    <div class="dub-dialog-heading"><div><div class="panel-kicker">AÇÕES DO PERSONAGEM</div><h2 id="dubCharacterActionsTitle">Personagem</h2><p id="dubCharacterActionsContext" class="settings-note">Ações do cadastro e dos perfis.</p></div><button class="icon-button" type="button" data-close-dub-dialog aria-label="Fechar">✕</button></div>
+    <div class="dub-character-action-list">
+      <button id="dubCharacterOpenRoi" type="button" class="button quiet"><span aria-hidden="true">▧</span><span><b>Abrir cadastro da ROI</b><small>Editar ou remover este personagem na tela Captura</small></span></button>
+      <button id="dubCharacterConfirmIdentity" type="button" class="button quiet"><span aria-hidden="true">✓</span><span><b>Confirmar identidade</b><small>Habilita a associação e criação de perfil vocal</small></span></button>
+      <button id="dubCharacterProfiles" type="button" class="button quiet"><span aria-hidden="true">♫</span><span><b>Abrir perfil vocal</b><small>Editar o perfil associado ou criar um novo</small></span></button>
+    </div>
+  </dialog>
+  <dialog id="dubVoiceDialog" class="dub-dialog">
+    <form method="dialog" id="dubVoiceForm"><div class="dub-dialog-heading"><div><div class="panel-kicker">PERFIL VOCAL</div><h2 id="dubVoiceDialogTitle">Configurar voz</h2></div><button class="icon-button" type="button" data-close-dub-dialog aria-label="Fechar">✕</button></div>
+      <input id="dubVoiceProfileId" type="hidden"><input id="dubVoiceCharacterId" type="hidden"><label class="field">Nome do perfil<input id="dubVoiceName" maxlength="120" required placeholder="RED PT-BR 01"></label><div class="dub-dialog-fields"><label class="field">Idioma<select id="dubVoiceLanguage"><option value="pt-BR">Português brasileiro (pt-BR)</option><option value="en">Inglês (en)</option><option value="es">Espanhol (es)</option></select></label><label class="field">Modo<select id="dubVoiceMode"><option value="clone">Clonagem com referência autorizada</option><option value="design">Voz desenhada por instrução</option></select></label></div>
+      <label id="dubVoiceInstructWrap" class="field">Descrição da voz / instrução padrão<textarea id="dubVoiceDefaultInstruct" maxlength="2000" rows="2" placeholder="Voz adulta, grave, PT-BR, fala natural…"></textarea></label><div id="dubVoiceReferenceFields"><label class="field">Texto falado na referência (opcional)<textarea id="dubReferenceText" maxlength="4000" rows="2" placeholder="Transcrição da amostra vocal"></textarea></label><div class="dub-extract-fields"><label class="field">Extrair do vídeo · início (s)<input id="dubExtractStart" type="number" min="0" step="0.001"></label><label class="field">Fim (s)<input id="dubExtractEnd" type="number" min="0" step="0.001"></label><button id="dubExtractReference" type="button" class="button quiet">Extrair amostra</button></div><div id="dubReferenceQuality" class="dub-reference-quality">Use somente voz com autorização.   A referência é normalizada para WAV PCM mono 24 kHz.</div></div>
+      <label class="field">Velocidade padrão<input id="dubVoiceDefaultSpeed" type="number" min="0.5" max="2" step="0.05" value="1.0"></label><label class="dub-consent-check"><input id="dubVoiceAuthorized" type="checkbox">Confirmo que tenho autorização para usar esta voz e que revisei a licença dos pesos OmniVoice.</label><p class="settings-note">Os pesos publicados do OmniVoice têm licença CC-BY-NC. Este módulo mantém o serviço local e não envia referências para terceiros.</p>
+      <div class="dialog-actions"><button type="button" class="button quiet" data-close-dub-dialog>Cancelar</button><button id="dubSaveVoiceProfile" type="button" class="button primary">Salvar perfil</button></div>
+    </form>
+  </dialog>
+  <dialog id="dubVoiceCatalogDialog" class="dub-dialog dub-voice-catalog-dialog"><div class="dub-dialog-heading"><div><div class="panel-kicker">REFERÊNCIAS VISUAIS · PT-BR</div><h2>Modelos de voz</h2><p>Os cartões mostram referências do site. O modelo local não inclui esses áudios: anexe um WAV/MP3 autorizado para clonar.</p></div><button class="icon-button" type="button" data-close-dub-dialog aria-label="Fechar">✕</button></div><div class="dub-voice-catalog-grid">
+    <article class="dub-voice-model-card" data-voice-model="Elon Musk (redução de ruído)" data-instruct="male, middle-aged, low pitch" data-denoise="true"><div class="dub-model-avatar">EM</div><div><h3>Elon Musk (redução de ruído)</h3><div class="dub-model-tags"><span>Masculino</span><span>Deep</span><span>Conversacional</span><span>Meia-idade</span><span>Educação</span><span>Podcast</span><span>Confiante</span></div></div><button type="button" class="button quiet dub-select-model">Aplicar atributos</button></article>
+    <article class="dub-voice-model-card" data-voice-model="Bob Esponja Calça Quadrada" data-instruct="male, child"><div class="dub-model-avatar sponge">BS</div><div><h3>Bob Esponja Calça Quadrada</h3><div class="dub-model-tags"><span>Masculino</span><span>Energético</span><span>Caráter</span><span>Criança</span><span>Animação</span><span>Animado</span><span>Brincalhão</span></div></div><button type="button" class="button quiet dub-select-model">Aplicar atributos</button></article>
+    <article class="dub-voice-model-card" data-voice-model="Donald J. Trump (redução de ruído)" data-instruct="male, middle-aged, low pitch" data-denoise="true"><div class="dub-model-avatar trump">DT</div><div><h3>Donald J. Trump (redução de ruído)</h3><div class="dub-model-tags"><span>Masculino</span><span>Deep</span><span>Conversacional</span><span>Meia-idade</span><span>Autoritativo</span><span>Confiante</span><span>Marketing</span></div></div><button type="button" class="button quiet dub-select-model">Aplicar atributos</button></article>
+    <div class="dub-model-disclaimer">A galeria aplica somente gênero, idade e pitch documentados pela API; os áudios do site não são baixados. Sotaque inglês só atua em fala inglesa e dialeto chinês só em fala chinesa, então ficam fora do PT-BR. O desenho de voz pode generalizar, mas é experimental em PT-BR.</div>
+  </div></dialog>
+  <dialog id="dubBatchDialog" class="dub-dialog dub-batch-dialog"><div class="dub-dialog-heading"><div><div class="panel-kicker">VALIDAÇÃO DA FILA</div><h2>Personagens sem perfil vocal pronto</h2></div><button class="icon-button" type="button" data-close-dub-dialog aria-label="Fechar">✕</button></div><p class="settings-note">Somente falas aceitas/corrigidas entram automaticamente. Configure perfis agora, ignore estas falas conscientemente ou cancele o lote.</p><div id="dubBatchMissingList" class="dub-batch-missing-list"></div><div class="dialog-actions"><button type="button" class="button quiet" data-close-dub-dialog>Cancelar lote</button><button id="dubBatchIgnoreMissing" type="button" class="button action-neutral">Ignorar sem perfil</button></div></dialog>
+
+  <dialog id="roiSettingsDialog" class="roi-dialog"><div class="roi-dialog-head"><div><span class="panel-kicker">REGIÃO DE DIÁLOGO</span><h2 id="roiDialogTitle">Configurar ROI</h2></div><button id="roiDialogClose" type="button" class="icon-button" title="Fechar sem aplicar as mudanças">×</button></div><div class="roi-dialog-tabs" role="tablist"><button type="button" class="roi-dialog-tab active" data-roi-tab="lifetime">Tempo de vida</button><button type="button" class="roi-dialog-tab" data-roi-tab="speaker">Personagem</button><button type="button" class="roi-dialog-tab" data-roi-tab="motion">Movimento</button></div><div class="roi-dialog-body"><section data-roi-page="lifetime" class="roi-page active"><label class="roi-check"><input id="roiLifetimeEnabled" type="checkbox">Usar tempo de vida personalizado</label><p>Fora das janelas, esta ROI deixa de gerar eventos. Tempo absoluto usa o vídeo completo; relativo soma o início do trecho analisado.</p><div class="roi-table-wrap"><table class="roi-config-table"><thead><tr><th>Referência</th><th>Início (s)</th><th>Fim (s)</th><th></th></tr></thead><tbody id="roiLifetimeRows"></tbody></table></div><button id="roiAddWindow" type="button" class="button quiet">＋ Adicionar janela</button></section><section data-roi-page="speaker" class="roi-page"><label class="roi-check"><input id="roiSpeakerEnabled" type="checkbox">Detectar nome de personagem nesta ROI</label><p>O alias interno substitui o nome identificado nas telas e nos vínculos do projeto; deixe-o vazio para usar o nome detectado. O nome preenchido em Personagem (opcional) nos eventos desta ROI cria automaticamente um personagem vinculado, com observação do evento e do tempo. Confira se o texto é realmente um personagem, pois o OCR pode confundir elementos do jogo com nomes. A leitura desta área é complementar. Um MP3 ou WAV anexado fica associado ao personagem e é detectado automaticamente no perfil vocal da tela Dublagem; não é necessário importá-lo novamente.</p><div class="roi-coordinate-grid"><label>X (%)<input id="roiSpeakerX" type="number" min="0" max="100" step=".1"></label><label>Y (%)<input id="roiSpeakerY" type="number" min="0" max="100" step=".1"></label><label>Largura (%)<input id="roiSpeakerW" type="number" min=".1" max="100" step=".1"></label><label>Altura (%)<input id="roiSpeakerH" type="number" min=".1" max="100" step=".1"></label></div><button id="roiMarkSpeaker" type="button" class="button quiet">⌖ Marcar área do nome na prévia</button><div class="roi-character-heading"><b>Personagens vinculados</b><button id="roiAddCharacter" type="button" class="button quiet">＋ Adicionar personagem</button></div><p id="roiCharacterLoadStatus" class="roi-character-load-status hidden" role="status"></p><div id="roiCharacters" class="roi-characters"></div></section><section data-roi-page="motion" class="roi-page"><label class="roi-check"><input id="roiMotionEnabled" type="checkbox">Legenda em movimento</label><p>Defina a posição inicial e outros pontos no tempo. A ROI interpola posição e tamanho entre os pontos; após o último, mantém a última posição.</p><div class="roi-table-wrap"><table class="roi-config-table"><thead><tr><th>Referência</th><th>Tempo (s)</th><th>X %</th><th>Y %</th><th>L %</th><th>A %</th><th></th></tr></thead><tbody id="roiMotionRows"></tbody></table></div><button id="roiAddPoint" type="button" class="button quiet">＋ Adicionar posição</button></section></div><div class="dialog-actions"><span id="roiSettingsError" role="alert"></span><button id="roiDialogCancel" type="button" class="button quiet">Cancelar</button><button id="roiDialogSave" type="button" class="button primary">Aplicar à próxima análise</button></div></dialog>
+  <dialog id="splitDialog" class="split-dialog"><form method="dialog"><div class="panel-kicker">PRÉVIA DO FRAME COMPLETO</div><h2>Confirmar ponto de divisão</h2><p id="splitReason" class="split-notice" role="status"></p><label class="field">Dividir em source_time (segundos)<input id="splitTimeInput" type="number" min="0" step="0.001"><small id="splitTimestampHint" class="split-time-hint"></small></label><p id="splitTimeLabel" class="microcopy" aria-live="polite"></p><div class="split-preview-frame"><div id="splitPreviewPlaceholder" class="split-preview-placeholder" role="status"><span class="split-preview-spinner" aria-hidden="true"></span><span id="splitPlaceholderText">A prévia do frame aparecerá aqui.</span></div><img id="splitPreviewImage" alt="Frame completo no ponto escolhido" hidden></div><div class="dialog-actions"><button id="previewSplit" class="button quiet" type="button">Pré-visualizar frame</button><button id="cancelSplit" class="button quiet" type="button">Cancelar</button><button id="confirmSplit" class="button primary" type="button" disabled>Confirmar divisão</button></div></form></dialog>
+  <dialog id="replaceDialog" class="split-dialog replace-dialog" aria-labelledby="replaceTitle"><div class="panel-kicker">REGRAS OCR DO PROJETO</div><h2 id="replaceTitle">Localizar e substituir</h2><p class="replace-explanation">Cadastre quantas correções precisar. As regras são aplicadas em ordem, sem diferenciar maiúsculas de minúsculas, ao texto processado de novas análises e ao refazer OCR. O texto original do OCR permanece preservado.</p><div id="replaceRulesList" class="replace-rules-list" aria-label="Regras de localização e substituição"></div><div class="replace-add-row"><button id="addReplaceRule" type="button" class="button quiet">＋ Adicionar regra</button><span id="replaceRuleCount" class="replace-rule-count"></span></div><p class="replace-scope">Exemplos: “R.E.A.C.H” → “Reach” e “maurici” → “mauricio”. Para apagar parte do OCR, deixe “Substituir por” vazio.</p><p id="replaceRulesStatus" class="replace-rules-status" role="status" aria-live="polite"></p><div class="dialog-actions"><button id="cancelReplace" type="button" class="button quiet">Cancelar</button><button id="saveReplaceRules" type="button" class="button primary">Salvar</button></div></dialog>
+  <dialog id="ocrRetryDialog" class="split-dialog compact-dialog"><h2>Nova leitura OCR</h2><p id="ocrRetryInfo" class="settings-note"></p><label class="field">Texto já salvo<textarea id="ocrRetryPrevious" readonly rows="3"></textarea></label><label class="field">Nova leitura<textarea id="ocrRetryCandidate" readonly rows="3"></textarea></label><p class="settings-note">A nova leitura e suas imagens ficam nos detalhes e no histórico. Aplicar copia o texto processado para a correção, preservando o OCR original.</p><div class="dialog-actions"><button id="ocrRetryKeep" type="button" class="button quiet">Manter texto atual</button><button id="ocrRetryApply" type="button" class="button primary">Aplicar como correção</button></div></dialog>
+  <dialog id="blockCompleteDialog" class="split-dialog compact-dialog"><h2 id="blockCompleteTitle">Bloco concluído: 100%</h2><p id="blockCompleteRange" class="split-notice"></p><div class="block-choice"><b>Ir para próximo bloco</b><p>Abre a próxima faixa do vídeo usando o tamanho configurado. Os eventos deste bloco ficam salvos e podem ser revistos depois.</p><button id="blockCompleteNext" type="button" class="button primary">Ir para próximo bloco ▶</button></div><div class="block-choice"><b>Passar pente fino!</b><p>Relê visualmente a ROI ao longo deste bloco, compara o novo OCR com os diálogos e correções salvos e procura texto estável em lacunas. Divergências aparecem em amarelo; nada é sobrescrito automaticamente. A varredura pode demorar.</p><button id="blockCompleteSweep" type="button" class="button quiet">◉ Passar pente fino!</button></div><div class="dialog-actions"><button id="blockCompleteLater" type="button" class="button quiet">Continuar revisando este bloco</button></div></dialog>
+  <dialog id="fileResumeDialog" class="split-dialog compact-dialog" aria-labelledby="fileResumeTitle"><div class="panel-kicker">BLOCO PAUSADO · PROGRESSO SALVO</div><h2 id="fileResumeTitle">Continuar análise?</h2><p id="fileResumeInfo" class="split-notice"></p><p class="settings-note">Sim continua do ponto salvo e mantém os diálogos deste bloco. Não apaga os diálogos e eventuais dublagens vinculadas somente deste bloco, depois recomeça do início; os outros blocos permanecem.</p><div class="dialog-actions"><button id="fileResumeCancel" type="button" class="button quiet">Fechar</button><button id="fileResumeRestart" type="button" class="button discard">Não, apagar bloco e reiniciar</button><button id="fileResumeContinue" type="button" class="button primary">Sim, continuar de onde parou</button></div></dialog>
+  <dialog id="settingsDialog" class="settings-dialog">
+    <form method="dialog" class="settings-shell">
+      <div class="settings-title"><div><div class="panel-kicker">AJUSTE FINO DO PIPELINE</div><h2>Configurações do DubSync</h2><p>Os ajustes de análise valem para novas análises; as opções de revisão valem imediatamente.</p></div><button id="closeSettings" type="button" class="icon-button" aria-label="Fechar configurações">✕</button></div>
+      <div class="settings-tabs" role="tablist" aria-label="Grupos de configuração">
+        <button type="button" class="settings-tab active" data-settings-tab="detection">Detecção</button>
+        <button type="button" class="settings-tab" data-settings-tab="preprocess">Pré-processamento</button>
+        <button type="button" class="settings-tab" data-settings-tab="ocr">OCR</button>
+        <button type="button" class="settings-tab" data-settings-tab="calibration">Calibração IA</button>
+        <button type="button" class="settings-tab" data-settings-tab="markers">Marcas temporais</button>
+        <button type="button" class="settings-tab" data-settings-tab="review">Revisão</button>
+        <button type="button" class="settings-tab" data-settings-tab="dubbing">Dublagem</button>
+        <button type="button" class="settings-tab" data-settings-tab="appearance">Aparência</button>
+        <button type="button" class="settings-tab" data-settings-tab="shortcuts">Atalhos</button>
+      </div>
+      <div class="settings-body">
+        <section class="settings-page active" data-settings-page="detection">
+          <div class="settings-intro"><b>Quando executar a leitura</b><span>Controles de amostragem, mudança visual e estabilidade do texto.</span></div>
+          <div class="settings-grid">
+            <label class="field">Amostragem do vídeo (FPS)<input id="cfgAnalysisFps" type="number" min="2" max="15" step="1"></label>
+            <label class="field">Intervalo OCR periódico (s)<input id="cfgPeriodicOcr" type="number" min="0.25" max="8" step="0.05"></label>
+            <label class="field">Sensibilidade a mudança visual<input id="cfgChangeThreshold" type="number" min="0.2" max="20" step="0.1"></label>
+            <label class="field">Pixels alterados (%)<input id="cfgChangedPixels" type="number" min="0.1" max="20" step="0.1"></label>
+            <label class="field">Observações estáveis para iniciar<input id="cfgStable" type="number" min="1" max="8" step="1"></label>
+            <label class="field">Ausências para encerrar fala<input id="cfgAbsence" type="number" min="1" max="8" step="1"></label>
+          </div>
+          <p class="settings-note">A ROI continua sendo editada sobre o vídeo na tela principal. Essas opções determinam quando o OCR é chamado dentro dela.</p>
+        </section>
+        <section class="settings-page" data-settings-page="preprocess">
+          <div class="settings-intro"><b>Imagem enviada ao OCR local</b><span>O frame original permanece intacto; as transformações são cópias temporárias para reconhecimento.</span></div>
+          <div class="settings-grid">
+            <label class="field">Estratégia<select id="cfgPreMode"><option value="fast">Rápida: original</option><option value="balanced">Equilibrada: reforço se confiança baixa</option><option value="thorough">Minuciosa: várias variantes</option></select></label>
+            <label class="field">Contraste<input id="cfgContrast" type="number" min="0.5" max="2.5" step="0.05"></label>
+            <label class="field">Brilho<input id="cfgBrightness" type="number" min="-80" max="80" step="1"></label>
+            <label class="field">Limite adaptativo<select id="cfgThreshold"><option value="none">Desativado</option><option value="otsu">Otsu</option><option value="adaptive">Adaptativo local</option><option value="manual">Manual</option></select></label>
+            <label class="field">Valor do limite manual<input id="cfgThresholdValue" type="number" min="40" max="245" step="1"></label>
+            <label class="field">Fechamento morfológico<input id="cfgMorphology" type="number" min="0" max="5" step="1"></label>
+            <label class="field">Fallback quando confiança abaixo<input id="cfgFallbackConfidence" type="number" min="0.3" max="0.98" step="0.01"></label>
+          </div>
+          <div class="settings-checks"><label><input id="cfgClahe" type="checkbox">Contraste local (CLAHE)</label><label><input id="cfgUpscale" type="checkbox">Ampliar texto pequeno</label><label><input id="cfgSharpen" type="checkbox">Nitidez inteligente</label></div>
+        </section>
+        <section class="settings-page" data-settings-page="ocr">
+          <div class="settings-intro"><b>PaddleOCR local (CPU)</b><span>Detecção e reconhecimento visual sem orientação documental ou processamento de áudio.</span></div>
+          <div class="settings-grid">
+            <label class="field">Confiança mínima aceita<input id="cfgMinConfidence" type="number" min="0.05" max="0.95" step="0.01"></label>
+            <label class="field">Lado máximo do detector (px)<input id="cfgDetectionSide" type="number" min="640" max="2560" step="64"></label>
+          </div>
+          <div class="settings-checks"><label title="Remove no texto processado símbolos e pequenos fragmentos isolados reconhecidos no fim da legenda, como ícones da barra do jogo. O OCR bruto permanece salvo."><input id="cfgStripHudSuffix" type="checkbox">Forçar remoção de símbolos/fragmentos de HUD no final do texto</label></div>
+          <p class="settings-note">Ative quando ícones da barra ou da interface do jogo forem lidos como parte da fala. A limpeza só atua no sufixo final: o OCR original fica preservado e a calibração por IA recebe essa informação.</p>
+          <p class="settings-note">O idioma configurado na sessão determina o modelo de idioma PaddleOCR. O texto OCR original é mantido separado de correções humanas.</p>
+        </section>
+        <section class="settings-page" data-settings-page="calibration">
+          <div class="settings-intro"><b>OpenAI Vision ajuda a calibrar; PaddleOCR continua sendo o leitor local</b><span>A IA examina alguns frames do vídeo, identifica possíveis falas do jogo e sugere ROI e parâmetros para comparar com a leitura local.</span></div>
+          <div class="credential-row"><div><b>Chave da API</b><span id="openaiKeyStatus">Verificando configuração local…</span></div><button id="testOpenAi" type="button" class="button quiet">Testar conexão</button></div>
+          <div class="settings-grid">
+            <label class="field">Modelo com visão<input id="cfgOpenAiModel" type="text" maxlength="80"></label>
+            <label class="field">Trecho observado (s)<input id="cfgSampleDuration" type="number" min="3" max="30" step="1"></label>
+            <label class="field">Frames amostrados<input id="cfgSampleCount" type="number" min="3" max="10" step="1"></label>
+          </div>
+          <label class="consent-check"><input id="calibrationConsent" type="checkbox">Enviar até 10 imagens deste trecho à  API OpenAI para calibração visual. Sem áudio.</label>
+          <div class="calibration-actions"><button id="runCalibration" type="button" class="button primary" disabled>Analisar amostra do vídeo</button><button id="applyCalibration" type="button" class="button confirm" disabled>Aplicar sugestão</button></div>
+          <div id="calibrationResults" class="calibration-results" role="status">Selecione uma sessão concluída. Os tempos partem da posição atual do player.</div>
+        </section>
+        <section class="settings-page" data-settings-page="markers">
+          <div class="settings-intro"><b>Sincronização futura</b><span>Eventos OCR ganham um marcador no início da fala. O marcador manual abaixo guarda um tempo sem ler ou gravar áudio.</span></div>
+          <div class="marker-explainer"><span class="marker-sample event-sample"></span><div><b>Ponto de diálogo</b><small>Gerado automaticamente ao encontrar um evento; clique para selecionar e buscar no vídeo.</small></div></div>
+          <div class="marker-explainer"><span class="marker-sample audio-sample">♪</span><div><b>Início de áudio (futuro)</b><small>Use o botão na timeline para registrar um source_time manual. Nenhum áudio é processado neste milestone.</small></div></div>
+        </section>
+        <section class="settings-page" data-settings-page="review">
+          <div class="settings-intro"><b>Divisão de diálogos</b><span>Escolha se a janela de divisão deve buscar e mostrar um frame antes da confirmação.</span></div>
+          <div class="settings-checks"><label title="Ao desativar, a janela de divisão abre sem buscar a imagem e permite confirmar o tempo escolhido imediatamente."><input id="cfgSplitPreview" type="checkbox">Mostrar prévia do frame ao dividir diálogos</label></div>
+          <div class="settings-intro"><b>Descarte de diálogos</b><span>Escolha se o botão Descartar preserva o registro para revisão ou o apaga definitivamente.</span></div>
+          <div class="settings-checks"><label title="Quando ativado, Descartar pede confirmação e apaga definitivamente o diálogo e os vínculos de revisão/dublagem sem uso compartilhado."><input id="cfgPermanentDiscard" type="checkbox">Excluir definitivamente ao descartar (pedir confirmação)</label></div>
+          <p class="settings-note">Desativar a prévia acelera a abertura da janela. A divisão continua salvando os frames completos e o histórico visual dos dois eventos.</p>
+        </section>
+        <section class="settings-page" data-settings-page="dubbing">
+          <div class="settings-intro"><b>OmniVoice local</b><span>Serviço isolado em Docker, com modelo sob demanda e uma fila serial de geração.</span></div>
+          <div class="settings-grid">
+            <label class="field">Endereço local do provider<input id="cfgDubbingBaseUrl" type="url" readonly></label>
+            <label class="field">Tempo limite por geração (s)<input id="cfgDubbingTimeout" type="number" min="30" max="1800" step="30"></label>
+          </div>
+          <div class="settings-checks"><label><input id="cfgDubbingAutoStart" type="checkbox">Iniciar o contêiner ao abrir o DubSync</label></div>
+          <p class="settings-note">A referência vocal e o serviço ficam nesta máquina. Os arquivos de áudio só são aceitos na área local; abrir o DubSync por outro computador não habilita geração remota.</p>
+          <p class="settings-note">Os pesos OmniVoice publicados usam licença CC-BY-NC. Confira a licença e a autorização da voz antes de gerar ou distribuir áudio.</p>
+        </section>
+        <section class="settings-page" data-settings-page="appearance">
+          <div class="settings-intro"><b>Identidade visual do espaço</b><span>Personalize os contornos dos cards em todas as telas e projetos.</span></div>
+          <div class="settings-grid">
+            <label class="field">Espessura das bordas (px)<input id="cfgBorderWidth" type="number" min="0.5" max="4" step="0.5"></label>
+            <label class="field">Cor das bordas<input id="cfgBorderColor" type="color" value="#26364d"></label>
+          </div>
+          <div class="appearance-preview-card"><span>Prévia dos cards</span><b>Contorno ajustável</b><small>Essa aparência é aplicada globalmente.</small></div>
+          <p class="settings-note">A capa cadastrada na Intro aparece suavizada atrás dos cards do espaço do projeto. A cor e a espessura salvas aqui valem também nas demais telas.</p>
+        </section>
+        <section class="settings-page" data-settings-page="shortcuts">
+          <div class="settings-intro"><b>Atalhos do player e da timeline</b><span>Referência de uso: After Effects — Espaço para pré-visualizar, teclas de navegação para mover pelo tempo, J/K para percorrer pontos e +/− para zoom. Cada combinação pode ser gravada novamente.</span></div>
+          <div class="shortcut-timings">
+            <label class="field">Passo principal (segundos)<input id="shortcutStepMain" type="number" min="0.01" max="3600" step="0.1" value="1"></label>
+            <label class="field">Passo fino (segundos)<input id="shortcutStepFine" type="number" min="0.01" max="60" step="0.01" value="0.1"></label>
+            <label class="field">Passo rápido (segundos)<input id="shortcutStepFast" type="number" min="0.1" max="3600" step="0.1" value="5"></label>
+          </div>
+          <div class="shortcut-list" id="shortcutList" aria-label="Atalhos configuráveis"></div>
+          <p class="settings-note">Ctrl+scroll sobre a timeline também ajusta o zoom, mantendo o ponto sob o cursor no mesmo lugar. Os atalhos de reprodução e busca só atuam quando o foco não está em um campo de texto, para não interromper a digitação.</p>
+        </section>
+      </div>
+      <div class="settings-footer"><span id="settingsStatus">Preferências locais</span><div><button id="cancelSettings" type="button" class="button quiet">Fechar</button><button id="saveSettings" type="button" class="button primary">Salvar configurações</button></div></div>
+    </form>
+  </dialog>
+  <dialog id="manualEventDialog" class="split-dialog manual-event-dialog">
+    <h2>Adicionar diálogo manual</h2>
+    <p class="settings-note">Cria um evento na posição indicada, sem OCR. O texto digitado fica identificado como anotação manual.</p>
+    <label class="field">Texto do diálogo<textarea id="manualEventText" maxlength="4000" rows="3" required placeholder="Digite o texto que não foi detectado"></textarea></label>
+    <div class="manual-event-times"><label class="field">Início (s)<input id="manualEventStart" type="number" min="0" step="0.001"></label><label class="field">Fim (s)<input id="manualEventEnd" type="number" min="0" step="0.001"></label></div>
+    <label class="field">Personagem (opcional)<input id="manualEventCharacter" type="text" maxlength="120"></label>
+    <div class="dialog-actions"><button id="cancelManualEvent" type="button" class="button quiet">Cancelar</button><button id="saveManualEvent" type="button" class="button primary">Criar diálogo</button></div>
+  </dialog>
+  <dialog id="omnivoiceMonitorDialog" class="omnivoice-monitor-dialog" aria-labelledby="omnivoiceMonitorTitle">
+    <header class="omnivoice-monitor-title">
+      <div class="omnivoice-title-mark" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 2v12m-4-8v5a4 4 0 0 0 8 0V6M5 11a7 7 0 0 0 14 0M12 18v4m-4 0h8"/></svg></div>
+      <div><h2 id="omnivoiceMonitorTitle">OmniVoice · desempenho local</h2><p>Monitoramento do contêiner em execução nesta máquina</p></div>
+      <span id="omnivoiceMonitorState" class="omnivoice-runtime-state waiting">Verificando</span>
+      <button id="omnivoiceMonitorClose" type="button" class="icon-button" aria-label="Fechar monitor">×</button>
+    </header>
+    <div class="omnivoice-monitor-body">
+      <div class="omnivoice-runtime-cards">
+        <article class="omnivoice-runtime-card"><small>CPU do OmniVoice</small><strong id="omnivoiceCpuValue">—</strong><span id="omnivoiceCpuDetail">% da capacidade total</span></article>
+        <article class="omnivoice-runtime-card"><small>RAM do contêiner</small><strong id="omnivoiceMemoryValue">—</strong><span id="omnivoiceMemoryDetail">uso atual / limite</span></article>
+        <article class="omnivoice-runtime-card"><small>Processador</small><strong id="omnivoiceCoreValue">—</strong><span>núcleos em uso / disponíveis</span></article>
+        <article class="omnivoice-runtime-card"><small>Modelo</small><strong id="omnivoiceModelValue">—</strong><span id="omnivoiceModelDetail">OmniVoice · dispositivo —</span></article>
+      </div>
+      <section class="omnivoice-charts" aria-label="Histórico de desempenho">
+        <article class="omnivoice-chart-card"><div class="omnivoice-chart-heading"><b>CPU · últimos minutos</b><span>0–100% da capacidade do host</span></div><canvas id="omnivoiceCpuChart" height="150" aria-label="Gráfico de uso de CPU do OmniVoice"></canvas></article>
+        <article class="omnivoice-chart-card"><div class="omnivoice-chart-heading"><b>Memória RAM</b><span id="omnivoiceMemoryChartLabel">uso do limite do contêiner</span></div><canvas id="omnivoiceMemoryChart" height="150" aria-label="Gráfico de memória RAM do contêiner OmniVoice"></canvas></article>
+      </section>
+      <section class="omnivoice-container-details" aria-label="Estado do contêiner">
+        <div><small>Contêiner</small><b id="omnivoiceContainerName">—</b></div>
+        <div><small>Estado</small><b id="omnivoiceContainerHealth">—</b></div>
+        <div><small>Tempo ativo</small><b id="omnivoiceUptime">—</b></div>
+        <div><small>Revisão do modelo</small><b id="omnivoiceRevision">—</b></div>
+      </section>
+      <section class="omnivoice-process-section">
+        <div class="omnivoice-process-heading"><div><b>Processos no contêiner</b><span id="omnivoiceProcessCount">—</span></div><small>A CPU é normalizada pela quantidade de núcleos disponíveis</small></div>
+        <div class="omnivoice-process-table-wrap"><table class="omnivoice-process-table"><thead><tr><th>PID</th><th>Processo</th><th>Estado</th><th>CPU</th><th>RAM</th><th>Threads</th></tr></thead><tbody id="omnivoiceProcessRows"><tr><td colspan="6">Aguardando dados do provider.</td></tr></tbody></table></div>
+      </section>
+      <p id="omnivoiceMonitorMessage" class="omnivoice-monitor-message" role="status">As medições são locais e só aparecem enquanto o serviço responde.</p>
+    </div>
+  </dialog>
+  <dialog id="layoutNameDialog" class="layout-name-dialog" aria-labelledby="layoutNameTitle">
+    <form id="layoutNameForm" method="dialog">
+      <div class="layout-name-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="7" height="9" rx="1"/><rect x="14" y="3" width="7" height="5" rx="1"/><rect x="14" y="12" width="7" height="9" rx="1"/><rect x="3" y="16" width="7" height="5" rx="1"/></svg></div>
+      <h2 id="layoutNameTitle">Salvar layout</h2>
+      <p id="layoutNameDescription">Dê um nome para reconhecer esta organização dos cards.</p>
+      <label for="layoutNameInput">Nome do layout</label>
+      <input id="layoutNameInput" type="text" maxlength="48" autocomplete="off" required placeholder="Ex.: Edição compacta">
+      <div class="layout-name-actions"><button id="layoutNameCancel" type="button" class="button quiet">Cancelar</button><button id="layoutNameConfirm" type="submit" class="button primary"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2Z"/><path d="M17 21v-8H7v8M7 3v5h8"/></svg>Salvar</button></div>
+    </form>
+  </dialog>
+  <div id="toast" class="toast" role="status"></div>
+  <div id="timelineTooltip" class="timeline-tooltip" role="tooltip" hidden></div>
+  <script src="/static/app.js?v=20261006-6" defer></script>
+  <script src="/static/roi.js?v=20261005-4" defer></script>
+  <script src="/static/settings.js?v=20261006-1" defer></script>
+  <script src="/static/dubbing.js?v=20261006-8" defer></script>
+  <script src="/static/omnivoice-monitor.js?v=20261005-4" defer></script>
+  <script src="/static/layout-presets.js?v=20261006-3" defer></script>
+  <script src="/static/dock.js?v=20261006-6" defer></script>
+  <script src="/static/dubbing-dock.js?v=20261006-11" defer></script>
+  <script src="/static/tooltips.js?v=20261006-3" defer></script>
+</body>
+</html>

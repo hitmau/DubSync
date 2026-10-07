@@ -1,0 +1,265 @@
+/* Aparência global do espaço do projeto, ajustável pelas Configurações. */
+body {
+  background-color: var(--bg);
+  background-image:
+    linear-gradient(135deg, rgb(7 13 23 / 68%), rgb(7 13 23 / 64%)),
+    var(--project-cover-image, none);
+  background-position: center;
+  background-size: cover;
+  background-attachment: fixed;
+}
+
+.appbar,
+.app-grid,
+.dubbing-view {
+  background-color: transparent;
+}
+
+.appbar {
+  background-color: rgb(16 26 42 / 91%);
+  backdrop-filter: blur(10px);
+}
+
+.panel {
+  border-width: var(--ui-border-width, 1px);
+  border-color: var(--ui-border-color, var(--line));
+  background-color: color-mix(in srgb, var(--panel) 88%, transparent);
+  backdrop-filter: blur(8px);
+}
+
+.dub-stat-card,
+.dub-production-stats > div,
+.roi-character {
+  border-width: var(--ui-border-width, 1px);
+  border-color: var(--ui-border-color, var(--line));
+  background-color: color-mix(in srgb, var(--panel) 82%, transparent);
+}
+
+.dub-stat-card {
+  background: color-mix(in srgb, var(--panel) 82%, transparent);
+}
+
+.appearance-preview-card {
+  display: grid;
+  gap: 5px;
+  margin: 10px;
+  padding: 12px;
+  border: var(--ui-border-width, 1px) solid var(--ui-border-color, var(--line));
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--panel) 82%, transparent);
+}
+
+.appearance-preview-card span,
+.appearance-preview-card small {
+  color: var(--muted);
+}
+
+.appearance-preview-card b {
+  font-size: 13px;
+}
+
+/* O mapa do progresso e seus indicadores formam um painel que pode ser encaixado. */
+.dubbing-view {
+  grid-template-rows: minmax(0, 1fr) 19px;
+}
+
+.dub-video-overview.video-overview-panel {
+  container: dub-overview / inline-size;
+  min-height: 104px;
+  grid-template-rows: minmax(30px, auto) 12px 16px minmax(0, 1fr);
+  gap: 3px;
+  padding: 0 8px 6px;
+}
+
+.dub-video-overview .overview-title {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 8px;
+  width: 100%;
+  height: auto;
+  min-height: 30px;
+  min-width: 0;
+  padding: 2px 5px;
+}
+
+.dub-video-overview .overview-title-main {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  min-width: max-content;
+}
+
+.dub-video-overview .overview-title h2 {
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.dub-video-overview .overview-title .dock-header-actions {
+  flex: 1 1 auto;
+  min-width: 0;
+  gap: 7px;
+}
+
+.dub-video-overview .dub-project-mark {
+  flex: 0 0 auto;
+  gap: 6px;
+}
+
+.dub-video-overview .dub-project-icon {
+  width: 25px;
+  height: 24px;
+  font-size: 12px;
+}
+
+.dub-video-overview .dub-project-mark > div strong {
+  font-size: 10px;
+}
+
+.dub-video-overview .dub-project-mark .dub-status-pill,
+.dub-video-overview .dub-project-mark .button {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+.dub-video-overview .dub-project-mark .button,
+.dub-video-overview .dub-global-actions .button {
+  min-height: 23px;
+  padding: 3px 6px;
+  font-size: 8px;
+}
+
+.dub-video-overview .overview-current {
+  flex: 1 1 130px;
+  min-width: 90px;
+  margin: 0;
+}
+
+.dub-video-overview .overview-actions {
+  display: flex;
+  flex: 0 1 auto;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 7px;
+  min-width: 0;
+  white-space: nowrap;
+}
+
+.dub-video-overview #dubOverviewProgressLabel {
+  color: #dbe8f7;
+  font: 600 9px var(--mono);
+}
+
+.dub-video-overview .dub-session-picker {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  color: #9eacc0;
+  font-size: 8px;
+}
+
+.dub-video-overview .dub-session-picker select {
+  width: clamp(145px, 16vw, 230px);
+  height: 23px;
+  min-width: 0;
+  padding: 3px 6px;
+  border: 1px solid #344862;
+  border-radius: 4px;
+  background: #0d1726;
+  color: #d8e2ef;
+  font-size: 8px;
+}
+
+.dub-video-overview .dub-global-actions {
+  gap: 4px;
+}
+
+.dub-video-overview .overview-track {
+  min-height: 12px;
+}
+
+.dub-summary {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  grid-auto-rows: minmax(38px, 1fr);
+  gap: 5px;
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+  scrollbar-width: thin;
+  scrollbar-color: #354968 transparent;
+}
+
+.dub-stat-card {
+  min-height: 38px;
+  padding: 5px 8px;
+}
+
+.dub-stat-card > span,
+.dub-stat-card small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+@container dub-overview (max-width: 1180px) {
+  .dub-video-overview.video-overview-panel {
+    min-height: 124px;
+    grid-template-rows: minmax(53px, auto) 12px 16px minmax(0, 1fr);
+  }
+
+  .dub-video-overview .overview-title {
+    flex-wrap: wrap;
+    align-content: center;
+    gap: 3px 7px;
+    padding: 3px 5px;
+  }
+
+  .dub-video-overview .overview-title-main {
+    flex: 0 0 100%;
+  }
+
+  .dub-video-overview .overview-title .dock-header-actions {
+    flex: 1 1 100%;
+    flex-wrap: wrap;
+    justify-content: flex-start;
+    margin-left: 0;
+    gap: 4px 6px;
+  }
+
+  .dub-video-overview .overview-actions {
+    flex: 1 1 auto;
+    flex-wrap: wrap;
+    justify-content: flex-start;
+    gap: 4px 6px;
+  }
+}
+
+@container dub-overview (max-width: 650px) {
+  .dub-video-overview.video-overview-panel {
+    min-height: 158px;
+    grid-template-rows: minmax(84px, auto) 12px 16px minmax(0, 1fr);
+  }
+
+  .dub-video-overview .overview-title .overview-current {
+    display: none;
+  }
+
+  .dub-summary {
+    grid-template-columns: minmax(0, 1fr);
+    grid-auto-rows: minmax(38px, auto);
+  }
+
+  .dub-stat-card {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+}
+
+@media (max-height: 760px) {
+  .dubbing-view {
+    grid-template-rows: minmax(0, 1fr) 17px;
+  }
+
+  .dub-video-overview.video-overview-panel {
+    min-height: 104px;
+  }
+}

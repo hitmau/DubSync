@@ -1,0 +1,28 @@
+# Normalize text files while preserving native line endings for PowerShell scripts.
+* text=auto
+*.py text eol=lf
+*.cs text eol=lf
+*.js text eol=lf
+*.css text eol=lf
+*.html text eol=lf
+*.json text eol=lf
+*.jsonl text eol=lf
+*.md text eol=lf
+*.txt text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+*.ps1 text eol=crlf
+
+# Keep media, packaged documents, and executables byte-for-byte.
+*.docx binary
+*.exe binary
+*.ico binary
+*.jpg binary
+*.jpeg binary
+*.ogg binary
+*.png binary
+*.wav binary
+*.mp3 binary
+*.mp4 binary
+*.sqlite binary
+*.sqlite3 binary
