@@ -89,6 +89,93 @@ class RoiFeaturesTests(unittest.TestCase):
             with self.subTest(extra=extra), self.assertRaises(ValueError):
                 validate_regions([{**base, **extra}])
 
+    def test_character_prefix_separates_speaker_from_spoken_line(self) -> None:
+        name, speech = DialogueProcessor._detect_inline_character(
+            "  Mauricio: Como está você, Marihá?  ",
+            {"enabled": True, "prefix_before_colon": True},
+        )
+        self.assertEqual(name, "Mauricio")
+        self.assertEqual(speech, "Como está você, Marihá?")
+        self.assertEqual(DialogueProcessor._detect_inline_character(
+            "Sem prefixo.", {"prefix_before_colon": True}), (None, "Sem prefixo."))
+
+    def test_detected_inline_character_creates_roi_profile_and_keeps_raw_ocr(self) -> None:
+        config = validate_regions([{
+            "name": "Diálogo", "roi_id": "dialogue-roi", "x": .1, "y": .5,
+            "width": .8, "height": .4,
+            "character_detection": {"enabled": True, "prefix_before_colon": True},
+        }])[0]
+
+        class Store:
+            draft = None
+            profile = None
+
+            def ensure_roi_character(self, roi_id: str, name: str, notes: str) -> dict:
+                self.profile = {"roi_id": roi_id, "name": name, "character_id": "mauricio-id", "notes": notes}
+                return self.profile
+
+            def add_event(self, _session_id: str, draft: dict,
+                          _replace_scope: dict | None = None) -> tuple[str, bool]:
+                self.draft = draft
+                return "event-one", False
+
+        class Source:
+            def __init__(self, frame: FramePacket) -> None:
+                self.frame = frame
+
+            def frame_near(self, _source_time: float) -> FramePacket:
+                return self.frame
+
+        frame = FramePacket(np.zeros((100, 200, 3), np.uint8), "test", "live", 1,
+                            1.0, datetime.now(timezone.utc), 1_000_000_000)
+        raw = "Mauricio: Como está você?"
+        candidate = Candidate(raw, .93, (20, 55, 100, 22), frame,
+                              frame.image[55:77, 20:120].copy(), "0000000000000000", raw_text=raw)
+        store = Store()
+        with tempfile.TemporaryDirectory() as directory:
+            processor = DialogueProcessor(store, "test", Path(directory),
+                                          [Region.from_dict(config)], "pt", ocr=object())
+            processor.trackers["Diálogo"].active = Active(candidate, 1.0)
+            draft = processor.trackers["Diálogo"]._start(candidate, {})
+            self.assertEqual(processor._save_start(draft, Source(frame)), "event-one")
+
+        self.assertEqual(store.profile["name"], "Mauricio")
+        self.assertEqual(store.draft["character_profile_id"], "mauricio-id")
+        self.assertEqual(store.draft["original_text"], raw)
+        self.assertEqual(store.draft["processed_text"], "Como está você?")
+        self.assertIn("MP3 ou WAV", store.profile["notes"])
+
+    def test_character_color_matches_configured_text_color_inside_dialogue_box(self) -> None:
+        image = np.zeros((24, 32, 3), dtype=np.uint8)
+        image[8:16, 5:20] = (220, 40, 30)  # BGR for configured #1E28DC.
+        character = DialogueProcessor._detect_character_color(
+            image, (0, 0, 32, 24), [{"name": "Mauricio", "color": "#1E28DC", "tolerance": 8}],
+        )
+        self.assertEqual(character, "Mauricio")
+
+    def test_live_source_keeps_user_selected_sampling_rate(self) -> None:
+        class EmptyOcr:
+            def open(self) -> None:
+                pass
+
+        class LiveSource:
+            is_live = True
+            sample_fps = 5.0
+            last_source_time = 0.0
+            frames_read = 0
+
+            def iter_frames(self):
+                return iter(())
+
+            def close(self) -> None:
+                pass
+
+        source = LiveSource()
+        processor = DialogueProcessor(None, "live-test", Path("."), [], "en", ocr=EmptyOcr(),
+                                      settings={"detection": {"analysis_fps": 8}})
+        processor.run(source)
+        self.assertEqual(source.sample_fps, 5.0)
+
     def test_processor_skips_ocr_outside_lifetime_and_uses_moving_box(self) -> None:
         config = validate_regions([{
             "x": .1, "y": .1, "width": .3, "height": .2,

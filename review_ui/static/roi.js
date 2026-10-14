@@ -184,6 +184,20 @@
     dialog.querySelectorAll(".roi-dialog-tab").forEach((button) => button.classList.toggle("active", button.dataset.roiTab === name));
     dialog.querySelectorAll(".roi-page").forEach((page) => page.classList.toggle("active", page.dataset.roiPage === name));
   }
+  function renderCharacterColorRules(rules = []) {
+    const list = el("roiCharacterColorRules");
+    list.replaceChildren();
+    for (const rule of rules) {
+      const row = document.createElement("div"); row.className = "roi-color-rule";
+      const name = document.createElement("input"); name.type = "text"; name.maxLength = 120;
+      name.placeholder = "Nome do personagem"; name.value = String(rule.name || ""); name.setAttribute("aria-label", "Personagem associado à cor");
+      const color = document.createElement("input"); color.type = "color"; color.value = validColor(rule.color) ? rule.color : "#ffffff"; color.setAttribute("aria-label", "Cor da legenda");
+      const tolerance = document.createElement("input"); tolerance.type = "number"; tolerance.min = "0"; tolerance.max = "441"; tolerance.step = "1"; tolerance.value = String(rule.tolerance ?? 100); tolerance.title = "Tolerância da comparação de cor";
+      const remove = document.createElement("button"); remove.type = "button"; remove.className = "button quiet roi-color-rule-remove"; remove.textContent = "🗑"; remove.title = "Remover esta cor"; remove.setAttribute("aria-label", "Remover regra de cor");
+      remove.addEventListener("click", () => row.remove());
+      row.append(name, color, tolerance, remove); list.append(row);
+    }
+  }
   window.openRoiSettings = async (regionIndex) => {
     index = regionIndex;
     const region = regions[index];
@@ -193,6 +207,10 @@
     el("roiLifetimeEnabled").checked = !!region.lifetime?.enabled;
     el("roiMotionEnabled").checked = !!region.motion?.enabled;
     el("roiSpeakerEnabled").checked = !!region.speaker_enabled;
+    const characterDetection = region.character_detection || {};
+    el("roiCharacterDetectionEnabled").checked = !!characterDetection.enabled;
+    el("roiCharacterPrefixEnabled").checked = characterDetection.prefix_before_colon !== false;
+    renderCharacterColorRules(characterDetection.color_rules || []);
     el("roiLifetimeRows").replaceChildren();
     el("roiMotionRows").replaceChildren();
     (region.lifetime?.windows || []).forEach((item) => row("lifetime", item));
@@ -243,16 +261,30 @@
     }));
     const speaker_region = checkedBox({ x: el("roiSpeakerX").value, y: el("roiSpeakerY").value,
       width: el("roiSpeakerW").value, height: el("roiSpeakerH").value }, "Área do personagem");
+    const color_rules = [...el("roiCharacterColorRules").children].map((row) => ({
+      name: row.children[0].value.trim(), color: row.children[1].value.toUpperCase(),
+      tolerance: number(row.children[2].value || 100),
+    }));
+    if (color_rules.some((item) => !item.name || !validColor(item.color) || !Number.isFinite(item.tolerance) || item.tolerance < 0 || item.tolerance > 441)) {
+      throw new Error("Cada regra de cor precisa de um personagem, uma cor e tolerância de 0 a 441.");
+    }
     if (el("roiLifetimeEnabled").checked && !windows.length) throw new Error("Adicione pelo menos uma janela de tempo.");
     if (el("roiMotionEnabled").checked && !keyframes.length) throw new Error("Adicione pelo menos uma posição da ROI.");
     return { lifetime: { enabled: el("roiLifetimeEnabled").checked, windows },
       motion: { enabled: el("roiMotionEnabled").checked, keyframes },
-      speaker_enabled: el("roiSpeakerEnabled").checked, speaker_region };
+      speaker_enabled: el("roiSpeakerEnabled").checked, speaker_region,
+      character_detection: { enabled: el("roiCharacterDetectionEnabled").checked,
+        prefix_before_colon: el("roiCharacterPrefixEnabled").checked, color_rules } };
   }
   function close() { dialog.close(); }
   dialog.querySelectorAll(".roi-dialog-tab").forEach((button) => button.addEventListener("click", () => tab(button.dataset.roiTab)));
   el("roiAddWindow").addEventListener("click", () => row("lifetime", { mode: "relative", start: 0, end: 60 }));
   el("roiAddPoint").addEventListener("click", () => row("motion", { mode: "relative", time: 0, ...regions[index] }));
+  el("roiAddCharacterColorRule").addEventListener("click", () => renderCharacterColorRules([
+    ...[...el("roiCharacterColorRules").children].map((row) => ({ name: row.children[0].value,
+      color: row.children[1].value, tolerance: row.children[2].value })),
+    { name: "", color: "#ffffff", tolerance: 100 },
+  ]));
   el("roiAddCharacter").addEventListener("click", () => renderCharacters([...el("roiCharacters").querySelectorAll(".roi-character")].map((card) => ({
     ...card._profile, character_id: card.dataset.characterId, name: card.querySelector(".roi-character-name").value,
     alias: card.querySelector(".roi-character-alias").value,
@@ -269,10 +301,17 @@
       const region = regions[index];
       Object.assign(region, collect());
       await persistCharacters(region);
+      if (currentSession?.source_type === "game" && activeState?.()) {
+        const result = await api(`/api/runtime-capture/${encodeURIComponent(currentSession.session_id)}/regions`,
+          { method: "PUT", body: JSON.stringify({ regions: parseRegions() }) });
+        if (currentSession.config_json) currentSession.config_json.regions = result.regions;
+      }
       if (typeof eventFilterOptionsLoadedAt !== "undefined") eventFilterOptionsLoadedAt = 0;
       if (typeof refreshEvents === "function") await refreshEvents(true);
       updateRoiList(); drawPreview(); close();
-      toast("ROI salva. Os aliases foram aplicados aos diálogos vinculados e às próximas análises.");
+      toast(currentSession?.source_type === "game" && activeState?.()
+        ? "ROI atualizada no overlay; a Captura Real continua."
+        : "ROI salva. Os aliases foram aplicados aos diálogos vinculados e às próximas análises.");
     } catch (error) { el("roiSettingsError").textContent = error.message; }
   });
   el("roiMarkSpeaker").addEventListener("click", async () => {

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import hashlib
+import re
 import time
 import uuid
 from collections import deque
@@ -26,11 +27,12 @@ class DialogueProcessor:
     def __init__(self, store: DubSyncStore, session_id: str, session_dir: Path,
                  regions: list[Region], language: str, ocr: OcrEngine | None = None,
                  progress_callback=None, settings: dict | None = None,
-                 replace_scope: dict | None = None) -> None:
+                 replace_scope: dict | None = None, regions_provider=None) -> None:
         self.store = store
         self.session_id = session_id
         self.session_dir = session_dir
         self.regions = regions
+        self.regions_provider = regions_provider
         self.settings = settings or {}
         self.replace_scope = replace_scope
         load_replacements = getattr(self.store, "session_text_replacements", None)
@@ -77,9 +79,13 @@ class DialogueProcessor:
             self.progress_callback({"stage": "loading_ocr", "activity_message": "Carregando o mecanismo de OCR."})
         self.ocr.open()
         if self.progress_callback:
-            self.progress_callback({"stage": "indexing_timestamps", "activity_message": "OCR carregado; aguardando o índice temporal dos quadros."})
+            live_source = bool(getattr(source, "is_live", False))
+            self.progress_callback({"stage": "analysis" if live_source else "indexing_timestamps",
+                                   "activity_message": ("OCR carregado; iniciando a captura visual ao vivo."
+                                                        if live_source else
+                                                        "OCR carregado; aguardando o índice temporal dos quadros.")})
         analysis_fps = max(1, int(self.settings.get("detection", {}).get("analysis_fps", 8)))
-        if hasattr(source, "sample_fps"):
+        if hasattr(source, "sample_fps") and not getattr(source, "is_live", False):
             # The file reader can decode only the frames that this loop would
             # inspect. It still advances through every timestamp for continuity.
             source.sample_fps = analysis_fps
@@ -96,6 +102,7 @@ class DialogueProcessor:
                     )
                 self.last_packet_time = packet.source_time
                 self.current_segment_id = packet.segment_id
+                self._sync_regions(packet, source)
                 sample_interval = 1 / analysis_fps
                 if self.last_sample_time is not None and packet.source_time - self.last_sample_time < sample_interval - 1e-6:
                     continue
@@ -137,7 +144,7 @@ class DialogueProcessor:
         finally:
             source.close()
         paused = bool(getattr(source, "paused", False))
-        if not paused:
+        if not paused and not getattr(source, "is_live", False):
             self._fill_missing_timeline_frames(source)
         result = {"stage": "paused" if paused else "complete", "frames_seen": self.frame_count, "frames_analyzed": self.analysis_count,
                 "ocr_calls": self.ocr_calls,
@@ -191,6 +198,42 @@ class DialogueProcessor:
             actions = tracker.observe(packet, lines)
             self._actions(region.name, actions, packet, source)
 
+    def _sync_regions(self, packet: FramePacket, source: FrameSource) -> None:
+        if not self.regions_provider:
+            return
+        try:
+            configs = self.regions_provider() or []
+            incoming = [Region.from_dict(item, index, 0.0) for index, item in enumerate(configs)]
+        except Exception as exc:
+            if len(self.errors) < 100:
+                self.errors.append(f"Não foi possível atualizar as ROIs em tempo real: {type(exc).__name__}: {exc}")
+            return
+        old = {region.name: region for region in self.regions}
+        new = {region.name: region for region in incoming}
+        for name, region in old.items():
+            replacement = new.get(name)
+            if replacement == region:
+                continue
+            tracker = self.trackers.get(name)
+            if tracker:
+                self._actions(name, tracker.flush(), packet, source)
+            self.trackers.pop(name, None)
+            self.visual.reset(name)
+            self.last_ocr_at.pop(name, None)
+            self.inactive_regions.discard(name)
+        for name, region in new.items():
+            if name not in self.trackers:
+                self.trackers[name] = self._new_tracker(region)
+        self.regions = incoming
+
+    def _new_tracker(self, region: Region) -> DialogueTracker:
+        detection = self.settings.get("detection", {})
+        return DialogueTracker(region,
+                              int(detection.get("stable_observations", 3)),
+                              int(detection.get("absence_observations", 2)),
+                              float(self.settings.get("ocr", {}).get("min_confidence", 0.30)),
+                              bool(self.settings.get("ocr", {}).get("strip_trailing_hud_artifacts", False)))
+
     def _actions(self, region_name: str, actions: list[dict], packet: FramePacket,
                  source: FrameSource | None = None) -> None:
         for action in actions:
@@ -230,7 +273,9 @@ class DialogueProcessor:
         best_asset["kind"] = "best"
         assets.append(best_asset)
         speaker_observations = [item for item in event.get("ocr_observations_json", []) if item.get("kind") == "speaker"]
-        processed_text = apply_text_replacements(candidate.text, self.text_replacement_rules)
+        region = next((item for item in self.regions if item.roi_id == event.get("region_id")), None)
+        processed_text = self._speech_text(candidate.text, region)
+        processed_text = apply_text_replacements(processed_text, self.text_replacement_rules)
         ocr_observations = self._aligned_observations(candidate.ocr_observations)
         return {"original_text": candidate.raw_text if candidate.raw_text is not None else candidate.text,
                 "processed_text": processed_text, "normalized_text": normalize_text(processed_text),
@@ -260,6 +305,39 @@ class DialogueProcessor:
         start_frame = (source.frame_near(start_time) if source else None) or packet
         best_frame = tracker_candidate.best_packet or packet
         region = next((item for item in self.regions if item.name == draft.get("region_name")), None)
+        if region:
+            detection = region.character_detection or {}
+            if detection.get("enabled"):
+                character, speech_text = self._detect_inline_character(
+                    str(draft.get("original_text") or draft.get("processed_text") or ""), detection)
+                if character:
+                    draft["character"] = character
+                    draft["processed_text"] = speech_text
+                elif detection.get("color_rules"):
+                    color_name = self._detect_character_color(best_frame.image,
+                                                              tracker_candidate.bbox,
+                                                              detection.get("color_rules", []))
+                    if color_name:
+                        draft["character"] = color_name
+                if draft.get("character") and region.roi_id:
+                    detected_name = str(draft["character"]).strip()[:120]
+                    ensure_profile = getattr(self.store, "ensure_roi_character", None)
+                    if ensure_profile and detected_name:
+                        note = ("Identificado automaticamente no texto da legenda ou pela cor "
+                                f"configurada na ROI {region.name}, em {best_frame.source_time:.3f} s. "
+                                "Confira a grafia e anexe manualmente uma foto e um MP3 ou WAV de "
+                                "referência de voz quando estiverem disponíveis.")
+                        try:
+                            profile = ensure_profile(region.roi_id, detected_name, note)
+                            draft["character"] = str(profile["name"])[:120]
+                            draft["character_profile_id"] = profile["character_id"]
+                        except Exception as exc:
+                            self.errors.append(f"Perfil de personagem em {region.name}: {type(exc).__name__}: {exc}")
+                    draft["ocr_observations"].append({
+                        "kind": "speaker", "source_time": best_frame.source_time,
+                        "text": draft["character"], "confidence": tracker_candidate.confidence,
+                        "bbox": list(tracker_candidate.bbox), "source": "prefix_or_color",
+                    })
         if region and region.speaker_enabled:
             bounds = region.speaker_bounds(best_frame.image, best_frame.source_time)
             if bounds:
@@ -339,6 +417,52 @@ class DialogueProcessor:
         self.events_created += int(not duplicate)
         self.events_deduplicated += int(duplicate)
         return event_id
+
+    @staticmethod
+    def _detect_inline_character(text: str, detection: dict) -> tuple[str | None, str]:
+        if not detection.get("prefix_before_colon", True):
+            return None, text
+        match = re.match(r"^\s*([\wÀ-ÖØ-öø-ÿ][\wÀ-ÖØ-öø-ÿ .’'\-]{0,47})\s*:\s*(.+?)\s*$", text, re.UNICODE)
+        if not match:
+            return None, text
+        name = re.sub(r"\s+", " ", match.group(1)).strip(" .-_")
+        speech = match.group(2).strip()
+        if not speech or not any(char.isalpha() for char in name):
+            return None, text
+        return name[:120], speech
+
+    @classmethod
+    def _speech_text(cls, text: str, region: Region | None) -> str:
+        detection = (region.character_detection or {}) if region else {}
+        if not detection.get("enabled"):
+            return text
+        _name, speech = cls._detect_inline_character(text, detection)
+        return speech
+
+    @staticmethod
+    def _detect_character_color(image: np.ndarray, bbox: tuple[int, int, int, int], rules: list[dict]) -> str | None:
+        x, y, width, height = (int(value) for value in bbox)
+        crop = image[max(0, y):min(image.shape[0], y + height),
+                     max(0, x):min(image.shape[1], x + width)]
+        if crop.size == 0:
+            return None
+        hsv = cv2.cvtColor(crop, cv2.COLOR_BGR2HSV)
+        pixels = crop[(hsv[:, :, 1] >= 45) & (hsv[:, :, 2] >= 70)]
+        if pixels.size == 0:
+            return None
+        observed = np.median(pixels, axis=0)
+        best: tuple[float, str] | None = None
+        for rule in rules:
+            try:
+                raw = str(rule.get("color", "")).lstrip("#")
+                rgb = np.array([int(raw[i:i + 2], 16) for i in (0, 2, 4)], dtype=np.float32)
+                target_bgr = rgb[::-1]
+                distance = float(np.linalg.norm(observed - target_bgr))
+                if distance <= float(rule.get("tolerance", 100)) and (best is None or distance < best[0]):
+                    best = (distance, str(rule.get("name", "")))
+            except (ValueError, TypeError):
+                continue
+        return best[1] if best and best[1] else None
 
     def _aligned_observations(self, observations: list[dict]) -> list[dict]:
         aligned = []

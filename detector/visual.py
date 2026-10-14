@@ -20,6 +20,7 @@ class Region:
     speaker_region: dict[str, float] | None = None
     roi_id: str = ""
     source_start: float = 0.0
+    character_detection: dict[str, Any] | None = None
 
     @classmethod
     def from_dict(cls, value: dict, index: int = 0, source_start: float = 0.0) -> "Region":
@@ -29,7 +30,7 @@ class Region:
                    value.get("lifetime"), value.get("motion"),
                    bool(value.get("speaker_enabled", False)), value.get("speaker_region"),
                    str(value.get("roi_id", "")),
-                   float(source_start))
+                   float(source_start), value.get("character_detection"))
 
     def _time(self, entry: dict) -> float:
         return float(entry.get("time", 0) if "time" in entry else entry.get("start", 0)) + (self.source_start if entry.get("mode") == "relative" else 0)

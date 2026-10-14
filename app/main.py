@@ -7,6 +7,8 @@ import importlib.util
 import logging
 import mimetypes
 import os
+import subprocess
+import sys
 import threading
 import uuid
 from contextlib import asynccontextmanager
@@ -28,6 +30,8 @@ from ..capture.session_manager import (DATA_DIR, SESSION_DIR, VIDEO_LIBRARY_DIR,
 from ..capture.video_plan import build_video_plan
 from ..capture.file_source import FileVideoSource
 from ..capture.youtube_source import YoutubeFrameSource
+from ..capture.runtime_capture import RuntimeCaptureManager
+from ..capture.runtime_windows import client_window
 from ..database.store import DubSyncStore
 from ..database.models import DubbingProject
 from ..dubbing.api import create_router as create_dubbing_router
@@ -59,6 +63,8 @@ dubbing_docker = OmniVoiceDocker(APP_DIR.parent, load_settings,
                                  project_data_root_provider=lambda: dubbing_service.project_data_root)
 project_service = ProjectService(store, DATA_DIR)
 project_storage = ProjectStorage(DATA_DIR)
+runtime_capture = RuntimeCaptureManager(store, DATA_DIR, load_settings, project_storage,
+                                       on_complete=lambda _session_id: manager._mark_idle())
 integration_service = IntegrationService(store, DATA_DIR)
 dubbing_worker.auto_publish_callback = integration_service.schedule_auto_publish
 
@@ -143,6 +149,21 @@ class FileStart(BaseModel):
     duration: float = Field(gt=0, le=14400)
     language: str = Field(default="en", min_length=2, max_length=16)
     regions: list[dict[str, Any]] = Field(default_factory=list)
+
+
+class RuntimeCaptureStart(BaseModel):
+    hwnd: int = Field(gt=0)
+    language: str = Field(default="en", min_length=2, max_length=16)
+    fps: float = Field(default=5.0, ge=1.0, le=12.0)
+    regions: list[dict[str, Any]] = Field(default_factory=list, max_length=8)
+
+
+class RuntimeCaptureRegions(BaseModel):
+    regions: list[dict[str, Any]] = Field(min_length=1, max_length=8)
+
+
+class RuntimeCalibrationConsent(BaseModel):
+    consent_to_send_frames: bool = False
 
 
 class RoiCharacterInput(BaseModel):
@@ -843,6 +864,9 @@ def list_sessions():
     result = []
     for session in store.sessions():
         active = manager.status(session["session_id"])
+        live_job = runtime_capture.get(session["session_id"])
+        if live_job:
+            active = {**session, **live_job.state()}
         result.append(active or session)
     return {"sessions": result}
 
@@ -852,9 +876,165 @@ def get_session(session_id: str):
     # Completed sessions are no longer held by the live capture manager.
     # Fall back to the project-scoped database so editing actions can reopen them.
     value = manager.status(session_id) or store.session(session_id)
+    live_job = runtime_capture.get(session_id)
+    if live_job and value:
+        value = {**value, **live_job.state()}
     if not value:
         raise HTTPException(404, "Sessão não encontrada.")
     return value
+
+
+@app.get("/api/runtime-capture/processes")
+def runtime_capture_processes():
+    return {"windows": runtime_capture.processes()}
+
+
+@app.post("/api/runtime-capture/start", status_code=201)
+def start_runtime_capture(body: RuntimeCaptureStart, request: Request):
+    if os.name != "nt":
+        raise HTTPException(501, "Captura Real sobre janela está disponível no Windows.")
+    window = client_window(body.hwnd)
+    if not window or not any(int(item.get("hwnd", 0)) == body.hwnd
+                             for item in runtime_capture.processes()):
+        raise HTTPException(400, "A janela selecionada não está visível ou não pertence a um processo de jogo disponível.")
+    with manager.lock:
+        if manager.busy:
+            raise HTTPException(409, "Encerre a sessão de captura atual antes de iniciar Captura Real.")
+        manager.busy = True
+    try:
+        result = runtime_capture.start(current_project_id(), body.hwnd, body.regions,
+                                       body.language, body.fps)
+        command = [sys.executable, "-m", "Dupsync.capture.runtime_overlay",
+                   "--session-id", result["session_id"],
+                   "--project-id", current_project_id(),
+                   "--api-base", str(request.base_url).rstrip("/")]
+        creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+        overlay = subprocess.Popen(command, cwd=str(APP_DIR.parent.parent),
+                                   close_fds=True, creationflags=creationflags)
+        result["overlay_pid"] = overlay.pid
+        result["message"] = "A captura começou. A faixa de ferramentas ficará sobre o jogo; a tela do jogo não será espelhada no DubSync."
+        return result
+    except (ValueError, KeyError, OSError, RuntimeError) as exc:
+        job = runtime_capture.get(locals().get("result", {}).get("session_id", ""))
+        if job:
+            job.source.stop()
+        manager._mark_idle()
+        if isinstance(exc, KeyError):
+            raise HTTPException(404, "Projeto ou janela não encontrado.") from exc
+        raise HTTPException(400, str(exc)) from exc
+
+
+def _runtime_job_or_404(session_id: str):
+    job = runtime_capture.get(session_id)
+    session = store.session(session_id)
+    if not job or not session or session.get("source_type") != "game":
+        raise HTTPException(404, "Sessão de Captura Real não encontrada neste projeto.")
+    return job, session
+
+
+@app.get("/api/runtime-capture/{session_id}/status")
+def runtime_capture_status(session_id: str):
+    job, session = _runtime_job_or_404(session_id)
+    return {**session, **job.state()}
+
+
+@app.get("/api/runtime-capture/{session_id}/pending")
+def runtime_capture_pending(session_id: str):
+    _runtime_job_or_404(session_id)
+    pending = [item for item in store.events(session_id=session_id)
+               if item.get("review_status") == "pending"]
+    return {"events": [{"event_id": item["event_id"], "sequence": item["sequence"],
+                        "start_time": item["start_time"], "end_time": item["end_time"],
+                        "original_text": item.get("original_text") or "",
+                        "processed_text": item.get("processed_text") or item.get("original_text") or "",
+                        "character": item.get("character") or ""}
+                       for item in pending[-20:]]}
+
+
+@app.post("/api/runtime-capture/{session_id}/calibrate")
+def calibrate_runtime_capture(session_id: str, body: RuntimeCalibrationConsent):
+    if not body.consent_to_send_frames:
+        raise HTTPException(400, "Confirme o envio de até três imagens do jogo para a IA de calibração.")
+    job, _session = _runtime_job_or_404(session_id)
+    key = openai_api_key()
+    if not key:
+        raise HTTPException(400, "Configure OPENAI_API_KEY para usar a calibração por IA.")
+    window = client_window(job.hwnd)
+    if not window:
+        raise HTTPException(409, "A janela do jogo não está disponível para calibração.")
+    frames = []
+    try:
+        with mss.mss() as screen:
+            for index in range(3):
+                current = client_window(job.hwnd)
+                if not current:
+                    break
+                rect = {key: int(current[key]) for key in ("left", "top", "width", "height")}
+                image = job.source.capture_current_frame(screen)
+                height, width = image.shape[:2]
+                scale = min(1.0, 1280 / max(width, height))
+                if scale < 1:
+                    image = cv2.resize(image, (round(width * scale), round(height * scale)),
+                                       interpolation=cv2.INTER_AREA)
+                frames.append({"id": index + 1, "source_time": float(job.source.last_source_time),
+                               "image": image, "source_width": width, "source_height": height})
+                if index < 2:
+                    threading.Event().wait(0.4)
+        if len(frames) < 3:
+            raise ValueError("Não foi possível reunir três frames visíveis para calibrar.")
+        from ..ocr.calibration import _ask_vision, _proposed_region
+        settings = load_settings()
+        analysis = _ask_vision(key, settings["calibration"]["model"], frames,
+                               job.source.regions(), settings)
+        found_dialogue = any(isinstance(item, dict) and item.get("has_dialogue")
+                             for item in analysis.get("samples", []))
+        suggested = (_proposed_region(analysis, frames, job.source.regions())
+                     if found_dialogue else None)
+        return {"model": settings["calibration"]["model"], "sample_count": len(frames),
+                "suggested_region": suggested, "notes": str(analysis.get("notes", ""))[:1000],
+                "samples": [{"id": item.get("id"), "has_dialogue": bool(item.get("has_dialogue")),
+                             "text": str(item.get("text", ""))[:300]}
+                            for item in analysis.get("samples", []) if isinstance(item, dict)]}
+    except (ValueError, RuntimeError) as exc:
+        raise HTTPException(502 if isinstance(exc, RuntimeError) else 400, str(exc)) from exc
+
+
+@app.post("/api/runtime-capture/{session_id}/pause")
+def pause_runtime_capture(session_id: str):
+    _runtime_job_or_404(session_id)
+    try:
+        return runtime_capture.pause(session_id)
+    except KeyError as exc:
+        raise HTTPException(409, "A captura já foi encerrada.") from exc
+
+
+@app.post("/api/runtime-capture/{session_id}/resume")
+def resume_runtime_capture(session_id: str):
+    _runtime_job_or_404(session_id)
+    try:
+        return runtime_capture.resume(session_id)
+    except KeyError as exc:
+        raise HTTPException(409, "A captura não está mais ativa neste processo do DubSync.") from exc
+
+
+@app.post("/api/runtime-capture/{session_id}/stop")
+def stop_runtime_capture(session_id: str):
+    _runtime_job_or_404(session_id)
+    try:
+        return runtime_capture.stop(session_id)
+    except KeyError as exc:
+        raise HTTPException(409, "A captura já foi encerrada.") from exc
+
+
+@app.put("/api/runtime-capture/{session_id}/regions")
+def update_runtime_capture_regions(session_id: str, body: RuntimeCaptureRegions):
+    _runtime_job_or_404(session_id)
+    try:
+        return runtime_capture.update_regions(session_id, body.regions)
+    except KeyError as exc:
+        raise HTTPException(409, "A captura não está mais ativa.") from exc
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
 
 
 @app.delete("/api/sessions/{session_id}/block")

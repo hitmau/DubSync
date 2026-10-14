@@ -3,6 +3,7 @@ const $$ = (selector) => [...document.querySelectorAll(selector)];
 const DEFAULT_REGIONS = [{ roi_id: "dubsync-roi-main", x: .08, y: .63, width: .84, height: .32, name: "ROI 1 (Diálogo principal)", color: "#e43c46", enabled: true, visible: true }];
 const ROI_VISIBILITY_STORAGE_KEY = "dubsync.roiVisibility.v1";
 let mode = "youtube", activeSessionId = "", selectedDesktopRect = null, currentSession = null, preparePending = false, sessionHydrated = false;
+let runtimeWindowRefresh = null;
 let regions = structuredClone(DEFAULT_REGIONS), preview = null, previewKind = "", previewMode = "capture", drag = null;
 let persistentFilePauseAvailable = false;
 let sessions = [], events = [], selectedEventId = "", selectedThumb = "crop", pollTimer = 0, livePreviewTimer = 0, sessionWatchTimer = 0, toastTimer = 0, pausePending = false;
@@ -192,10 +193,101 @@ function updateInitialRangeSummary() { const node=$("#initialRangeSummary");if(!
 function sessionBlockIndex(session) { const config=session?.config_json||{};return Math.max(1,Number(config.block_index||(config.previous_session_id?2:1))); }
 function updateInitialRangeUi(session=currentSession) { const continuation=Boolean(session)&&sessionBlockIndex(session)>1,locked=Boolean(session)&&activeState(session.state);$("#initialRangeConfig")?.classList.toggle("hidden",continuation);$("#continuationRangeSummary")?.classList.toggle("hidden",!continuation);$("#sourceStart").disabled=locked;$("#sourceDuration").disabled=locked;if(!continuation){updateInitialRangeSummary();return;}const config=session.config_json||{},start=Number(session.source_start??config.start??0),duration=Number(config.duration??session.requested_duration??0),end=start+duration;$("#continuationRangeSummary").textContent=`Bloco ${sessionBlockIndex(session)}: ${timecode(start)} → ${timecode(end)} · ${timecode(duration)}. O próximo começará em ${timecode(end)}.`; }
 function activeState(state=currentSession?.state){return ["queued","downloading","preparing","running","processing","pausing","paused","stopping"].includes(state);}
-function sessionStateLabel(session){if(session?.state==="preparing"&&session.ready_for_calibration)return"Pronto para calibrar e iniciar";return({queued:"Na fila",downloading:"Baixando vídeo",preparing:"Preparando vídeo",running:"Analisando vídeo",processing:"Analisando vídeo",pausing:"Salvando pausa",paused:"Pausada",stopping:"Encerrando",complete:"Concluída",failed:"Falhou",stopped:"Interrompida"})[session?.state]||"Pronto";}
+function sessionStateLabel(session){if(session?.source_type==="game")return({preparing:"Preparando Captura Real",running:"Capturando jogo",processing:"Capturando jogo",pausing:"Pausando captura",paused:"Captura pausada",stopping:"Encerrando captura",complete:"Captura concluída",failed:"Captura falhou",stopped:"Interrompida"})[session?.state]||"Pronto";if(session?.state==="preparing"&&session.ready_for_calibration)return"Pronto para calibrar e iniciar";return({queued:"Na fila",downloading:"Baixando vídeo",preparing:"Preparando vídeo",running:"Analisando vídeo",processing:"Analisando vídeo",pausing:"Salvando pausa",paused:"Pausada",stopping:"Encerrando",complete:"Concluída",failed:"Falhou",stopped:"Interrompida"})[session?.state]||"Pronto";}
 function updatePlaybackButton(){const button=$("#playButton"),state=currentSession?.state,config=currentSession?.config_json||{},progress=currentSession?.progress||{};button.classList.toggle("busy",["queued","downloading","preparing","running","processing","pausing","stopping"].includes(state));button.classList.toggle("analysis-active",persistentFilePauseAvailable&&currentSession?.source_type==="file"&&state==="running"&&progress.stage==="analysis");$("#pauseButton").classList.toggle("hidden",persistentFilePauseAvailable&&currentSession?.source_type==="file");if(!sessionHydrated||preparePending){button.disabled=true;return;}if(state==="downloading"&&currentSession?.progress?.download_status==="finished"){button.disabled=true;button.textContent="Validando vídeo…";return;}if(config.mode==="youtube_download"&&["failed","stopped"].includes(state)&&!config.analysis_started){button.disabled=false;button.textContent="↻ Retomar download";return;}if(state==="preparing"&&currentSession?.ready_for_calibration&&config.downloaded_path&&!config.analysis_started){button.disabled=false;button.textContent="▶ Iniciar primeiro bloco";return;}if(persistentFilePauseAvailable&&currentSession?.source_type==="file"&&state==="paused"){button.disabled=false;button.textContent=`▶ Continuar análise do bloco ${sessionBlockIndex(currentSession)}`;return;}if(state==="complete"&&sessionBlockIndex(currentSession)>1){button.disabled=true;button.textContent=`✓ Bloco ${sessionBlockIndex(currentSession)} concluído`;return;}if(currentSession?.source_type==="file"&&["failed","stopped"].includes(state)){button.disabled=false;button.textContent=`↻ Retomar bloco ${sessionBlockIndex(currentSession)}`;return;}if(!currentSession||!activeState(state)){button.disabled=false;button.textContent=mode==="file"?"▶ Iniciar primeiro bloco":"⬇ Baixar vídeo";return;}if(state==="paused"){button.disabled=false;button.textContent="▶ Retomar análise";return;}if(persistentFilePauseAvailable&&currentSession?.source_type==="file"&&state==="running"){button.disabled=false;button.textContent="◌ Analisando frames / Pausar";return;}if(state==="pausing"){button.disabled=true;button.textContent="◌ Salvando pausa…";return;}button.disabled=true;if(state==="downloading")button.textContent="⬇ Baixando vídeo…";else if(state==="preparing")button.textContent="◌ Preparando vídeo…";else if(state==="running"&&(!progress.stage||progress.stage==="indexing_timestamps"||Number(progress.frames_seen||0)===0))button.textContent="◌ Indexando timestamps…";else button.textContent="◌ Analisando frames…";}
-function setMode(next,allowPreparedYoutube=false) { const preparedDownload=currentSession?.source_type==="youtube"&&currentSession?.config_json?.mode==="youtube_download"&&Boolean(currentSession?.config_json?.downloaded_path);if(activeState()&&currentSession&&next!==currentSession.source_type&&!(allowPreparedYoutube&&preparedDownload&&next==="file")){toast("Encerre a sessão ativa antes de mudar a fonte.",true);next=currentSession.source_type==="youtube"?"youtube":"file";}mode=next;$$('.source-tab').forEach((item)=>item.classList.toggle('active',item.dataset.mode===next));$('#urlField').classList.toggle('hidden',next!=='youtube');$('#fileField').classList.toggle('hidden',next!=='file');$('.segment-config').classList.toggle('hidden',next!=='youtube');$('.next-block-config').classList.toggle('hidden',next==='youtube');$('#selectCaptureButton').classList.toggle('hidden',next==='youtube');$('#transportCaption').textContent=next==='youtube'?'Download e análise local':'Vídeo local · reprodução e análise';$('#pauseButton').classList.remove('hidden');$('#segmentDuration').disabled=next!=='youtube';updatePlaybackButton();updateNextBlockControl();updateInitialRangeUi(currentSession);renderVideoOverview(); }
-function parseRegions() { return regions.filter((region) => region.enabled).map(({ roi_id,x,y,width,height,name,lifetime,motion,speaker_enabled,speaker_region }) => ({ roi_id:roi_id||crypto.randomUUID(),x,y,width,height,name,lifetime:lifetime||{enabled:false,windows:[]},motion:motion||{enabled:false,keyframes:[]},speaker_enabled:!!speaker_enabled,speaker_region:speaker_region||null })); }
+function setMode(next,allowPreparedYoutube=false) {
+  const preparedDownload=currentSession?.source_type==="youtube"&&currentSession?.config_json?.mode==="youtube_download"&&Boolean(currentSession?.config_json?.downloaded_path);
+  if(activeState()&&currentSession&&next!==currentSession.source_type&&!(allowPreparedYoutube&&preparedDownload&&next==="file")){
+    toast("Encerre a sessão ativa antes de mudar a fonte.",true);
+    next=({youtube:"youtube",file:"file",game:"game"})[currentSession.source_type]||"file";
+  }
+  mode=next;
+  $$('.source-tab').forEach((item)=>item.classList.toggle('active',item.dataset.mode===next));
+  $('#appGrid').dataset.sourceMode=next;
+  $('#urlField').classList.toggle('hidden',next!=='youtube');$('#fileField').classList.toggle('hidden',next!=='file');
+  $('#videoOverview').classList.toggle('hidden',next==='game');
+  $('#runtimeCaptureField').classList.toggle('hidden',next!=='game');
+  $('.segment-config').classList.toggle('hidden',next!=='youtube');$('.next-block-config').classList.toggle('hidden',next==='youtube'||next==='game');
+  $('#initialRangeConfig').classList.toggle('hidden',next==='game');$('#continuationRangeSummary').classList.toggle('hidden',next==='game'||!currentSession||sessionBlockIndex(currentSession)<=1);
+  $('#videoSectorControls').classList.toggle('hidden',next==='game');$('#selectCaptureButton').classList.toggle('hidden',next==='youtube'||next==='game');
+  $('#addRoiButton').classList.toggle('hidden',next==='game');$('#roiCaptureInstruction').textContent=next==='game'?'Use a barra transparente sobre o jogo para adicionar, mover, redimensionar ou remover as ROIs; o quadrado superior esquerdo move e o inferior direito redimensiona.':'Arraste ROIs para mover; use o canto inferior direito para redimensionar.';
+  $('.transport-row').classList.toggle('hidden',next==='game');$('#transportCaption').classList.toggle('hidden',next==='game');
+  $('#transportCaption').textContent=next==='youtube'?'Download e análise local':next==='file'?'Vídeo local · reprodução e análise':'Captura Real · janela do jogo';
+  $('#pauseButton').classList.remove('hidden');$('#segmentDuration').disabled=next!=='youtube';
+  updatePlaybackButton();updateNextBlockControl();updateInitialRangeUi(currentSession);renderVideoOverview();
+  if(next==='game')void refreshRuntimeWindows();
+}
+function parseRegions() { return regions.filter((region) => region.enabled).map(({ roi_id,x,y,width,height,name,lifetime,motion,speaker_enabled,speaker_region,character_detection }) => ({ roi_id:roi_id||crypto.randomUUID(),x,y,width,height,name,lifetime:lifetime||{enabled:false,windows:[]},motion:motion||{enabled:false,keyframes:[]},speaker_enabled:!!speaker_enabled,speaker_region:speaker_region||null,character_detection:character_detection||{enabled:false,prefix_before_colon:true,color_rules:[]} })); }
+async function refreshRuntimeWindows(){
+  if(runtimeWindowRefresh)return runtimeWindowRefresh;
+  runtimeWindowRefresh=(async()=>{
+    const select=$("#runtimeGameWindow"),previous=select.value||String(currentSession?.config_json?.hwnd||"");
+    $("#runtimeCaptureStatus").textContent="Procurando janelas de jogo visíveis…";
+    try{
+      const result=await api("/api/runtime-capture/processes"),windows=result.windows||[];
+      select.replaceChildren();
+      if(!windows.length){select.add(new Option("Nenhuma janela de jogo visível encontrada",""));$("#runtimeCaptureStatus").textContent="Abra o jogo em modo janela ou janela sem bordas e atualize a lista.";return;}
+      for(const item of windows){const foreground=item.foreground?" · em primeiro plano":"",label=`${item.title} · ${item.process_name} · PID ${item.pid}${foreground}`;select.add(new Option(label,String(item.hwnd)));}
+      if([...select.options].some((item)=>item.value===previous))select.value=previous;
+      $("#runtimeCaptureStatus").textContent=`${windows.length} janela(s) detectada(s). Escolha o jogo e inicie a captura.`;
+    }catch(error){select.replaceChildren(new Option("Falha ao listar janelas",""));$("#runtimeCaptureStatus").textContent=error.message;}
+  })().finally(()=>{runtimeWindowRefresh=null;});
+  return runtimeWindowRefresh;
+}
+function updateRuntimeCaptureControls(session=currentSession){
+  const game=session?.source_type==="game",state=session?.state||"",active=game&&["preparing","running","processing","paused","pausing","stopping"].includes(state);
+  $("#startRuntimeCapture").disabled=active||!$("#runtimeGameWindow").value;
+  $("#runtimeGameWindow").disabled=active;$("#refreshRuntimeWindows").disabled=active;
+  $("#pauseRuntimeCapture").disabled=!game||!["running","paused"].includes(state);
+  $("#pauseRuntimeCapture").textContent=state==="paused"?"▶ Continuar":"Ⅱ Pausar";
+  $("#stopRuntimeCapture").disabled=!game||!["running","paused","preparing","stopping"].includes(state);
+  $("#calibrateRuntimeRoi").disabled=!game||!["running","paused"].includes(state);
+  if(game){const progress=session.progress||{};$("#runtimeCaptureStatus").textContent=state==="paused"?`Captura pausada em ${timecode(progress.current_source_time||0)}.`:state==="complete"?`Captura encerrada · ${Number(progress.events_created||0)} diálogo(s) novo(s) salvos.`:state==="failed"?session.error||progress.activity_message||"A captura falhou.":`Captura ${sessionStateLabel(session).toLowerCase()} · ${Number(progress.frames_seen||0).toLocaleString("pt-BR")} frames · ${Number(progress.ocr_calls||0).toLocaleString("pt-BR")} leituras OCR.`;}
+}
+async function beginRuntimeCapture(){
+  const hwnd=Number($("#runtimeGameWindow").value);if(!hwnd)return toast("Escolha uma janela de jogo antes de iniciar.",true);
+  for(const region of regions.filter((item)=>item.enabled))if(!region.character_detection)region.character_detection={enabled:true,prefix_before_colon:true,color_rules:[]};
+  const available=parseRegions();if(!available.length)return toast("Ative ou desenhe ao menos uma ROI de diálogo.",true);
+  const button=$("#startRuntimeCapture");button.disabled=true;
+  try{
+    const result=await api("/api/runtime-capture/start",{method:"POST",body:JSON.stringify({hwnd,language:$("#language").value||"en",fps:Number($("#runtimeCaptureFps").value)||5,regions:available})});
+    const session=await api(`/api/sessions/${encodeURIComponent(result.session_id)}`);await refreshSessions();await attachActiveSession(session);
+    $("#runtimeCaptureStatus").textContent=result.message||"Captura Real iniciada.";toast("Captura Real iniciada. O jogo permanece na tela principal.");
+  }catch(error){$("#runtimeCaptureStatus").textContent=error.message;toast(error.message,true);}
+  finally{updateRuntimeCaptureControls();}
+}
+async function toggleRuntimePause(){
+  const session=currentSession;if(!session||session.source_type!=="game")return;
+  const action=session.state==="paused"?"resume":"pause";
+  try{await api(`/api/runtime-capture/${encodeURIComponent(session.session_id)}/${action}`,{method:"POST",body:"{}"});await refreshSession();}
+  catch(error){toast(error.message,true);}
+}
+async function stopRuntimeCapture(){
+  const session=currentSession;if(!session||session.source_type!=="game")return;
+  if(!confirm("Encerrar a Captura Real e salvar os diálogos detectados?"))return;
+  try{await api(`/api/runtime-capture/${encodeURIComponent(session.session_id)}/stop`,{method:"POST",body:"{}"});$("#runtimeCaptureStatus").textContent="Encerrando e salvando o diálogo atual…";}
+  catch(error){toast(error.message,true);}
+}
+async function calibrateRuntimeRoi(){
+  const session=currentSession;if(session?.source_type!=="game"||!["running","paused"].includes(session.state))return;
+  if(!confirm("A calibração enviará até três imagens da janela do jogo à OpenAI usando a configuração de IA do projeto. Deseja continuar?"))return;
+  const button=$("#calibrateRuntimeRoi");button.disabled=true;$("#runtimeCaptureStatus").textContent="Capturando amostra e solicitando a sugestão à IA…";
+  try{
+    const result=await api(`/api/runtime-capture/${encodeURIComponent(session.session_id)}/calibrate`,{method:"POST",body:JSON.stringify({consent_to_send_frames:true})});
+    const suggested=result.suggested_region;
+    if(!suggested){$("#runtimeCaptureStatus").textContent="A IA não encontrou uma legenda legível nas amostras. Mantenha a ROI e marque-a manualmente no overlay.";return;}
+    const target=regions.find((item)=>item.enabled);
+    if(!target){toast("Ative uma ROI antes de aplicar a calibração.",true);return;}
+    const sampleText=(result.samples||[]).filter((item)=>item.has_dialogue&&item.text).map((item)=>item.text).slice(0,2).join(" · ");
+    const detail=`Sugestão da IA para ${target.name}: x ${Math.round(suggested.x*100)}%, y ${Math.round(suggested.y*100)}%, largura ${Math.round(suggested.width*100)}%, altura ${Math.round(suggested.height*100)}%.${sampleText?`\n\nTexto reconhecido: ${sampleText}`:""}${result.notes?`\n\n${result.notes}`:""}\n\nAplicar no overlay agora?`;
+    if(!confirm(detail)){$("#runtimeCaptureStatus").textContent="Sugestão não aplicada. A ROI atual permaneceu intacta.";return;}
+    Object.assign(target,{x:suggested.x,y:suggested.y,width:suggested.width,height:suggested.height});
+    const updated=await api(`/api/runtime-capture/${encodeURIComponent(session.session_id)}/regions`,{method:"PUT",body:JSON.stringify({regions:parseRegions()})});
+    if(session.config_json)session.config_json.regions=updated.regions;updateRoiList();drawPreview();
+    $("#runtimeCaptureStatus").textContent=`ROI calibrada pela IA (${result.model}, ${result.sample_count} frames).`;toast("ROI atualizada no overlay. A captura continuou normalmente.");
+  }catch(error){$("#runtimeCaptureStatus").textContent=error.message;toast(error.message,true);}
+  finally{updateRuntimeCaptureControls();}
+}
 function readRoiVisibility() { try { const value=JSON.parse(localStorage.getItem(ROI_VISIBILITY_STORAGE_KEY)||"{}"); return value&&typeof value==="object"&&!Array.isArray(value)?value:{}; } catch { return {}; } }
 function saveRoiVisibility(region,visible) { region.visible=visible; if(!region.roi_id)return; const saved=readRoiVisibility(); saved[region.roi_id]=visible; try { localStorage.setItem(ROI_VISIBILITY_STORAGE_KEY,JSON.stringify(saved)); } catch {} }
 function updateRoiList() { const list = $("#roiList"); list.replaceChildren(); regions.forEach((region,index) => { const row=document.createElement("div"); row.className="roi-row"; const checkbox=document.createElement("input"); checkbox.type="checkbox"; checkbox.checked=region.enabled;checkbox.title="Ativar ou desativar a busca de texto nesta região."; checkbox.addEventListener("change",()=>{region.enabled=checkbox.checked;drawPreview();}); const name=document.createElement("span"); name.textContent=region.name; name.title=`x ${region.x.toFixed(3)}, y ${region.y.toFixed(3)}, ${region.width.toFixed(3)} × ${region.height.toFixed(3)}`; const visibility=document.createElement("button");visibility.type="button";visibility.className=`roi-visibility-button${region.visible===false?" is-hidden":""}`;visibility.innerHTML=region.visible===false?'<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 3l18 18M10.6 10.6a2 2 0 0 0 2.8 2.8"/><path d="M9.9 5.2A10.8 10.8 0 0 1 12 5c6.4 0 10 7 10 7a17 17 0 0 1-3.1 3.8M6.2 6.2C3.5 8.1 2 12 2 12s3.6 7 10 7a10.8 10.8 0 0 0 3-.4"/></svg>':'<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/></svg>';visibility.title=region.visible===false?`Exibir ${region.name} na prévia. A busca OCR continua independente.`:`Ocultar ${region.name} na prévia sem desativar a busca OCR.`;visibility.setAttribute("aria-label",visibility.title);visibility.setAttribute("aria-pressed",String(region.visible!==false));visibility.addEventListener("click",()=>{saveRoiVisibility(region,region.visible===false);updateRoiList();drawPreview();}); const color=document.createElement("i"); color.className="roi-color"; color.style.background=region.color; const settings=document.createElement("button");settings.type="button";settings.className="roi-settings-button";settings.textContent="⚙";settings.title=`Configurar tempo de vida, personagem e movimento da ${region.name}.`;settings.setAttribute("aria-label",`Configurar ${region.name}`);settings.addEventListener("click",()=>window.openRoiSettings?.(index)); const remove=document.createElement("button"); remove.type="button"; remove.textContent="×"; remove.title=`Remover ${region.name} da próxima análise.`; remove.addEventListener("click",()=>{regions.splice(index,1);updateRoiList();drawPreview();}); row.append(checkbox,name,visibility,color,settings,remove); list.append(row); }); }
@@ -575,6 +667,7 @@ function overviewChain(){
 }
 async function loadVideoOverviewPlan(session=currentSession,force=false){
   const id=session?.session_id;if(!id){overviewSessionId="";overviewSessions=[];overviewSectors=[];overviewVideoDuration=0;renderVideoOverview();updateVideoSectorControls();return false;}
+  if(session?.source_type==="game"){overviewSessionId=id;overviewSessions=[session];overviewSectors=[];overviewVideoDuration=0;updateVideoSectorControls();return true;}
   if(!force&&overviewSessionId===id)return true;const cachedSessions=overviewSessions,cachedSectors=overviewSectors;overviewSessionId=id;overviewSessions=[];overviewSectors=[];overviewVideoDuration=Number(session.config_json?.video_duration)||0;renderVideoOverview();
   try{const result=await api(`/api/sessions/${encodeURIComponent(id)}/video-plan`);if(overviewSessionId!==id)return false;overviewSessions=result.sessions||[];overviewSectors=result.sectors||[];overviewVideoDuration=Number(result.video_duration)||overviewVideoDuration;}
   catch(error){if(overviewSessionId===id){overviewSessions=cachedSessions.length?cachedSessions:[session];overviewSectors=cachedSectors;console.warn("Não foi possível carregar o plano completo do vídeo:",error);renderVideoOverview();}return false;}
@@ -683,6 +776,8 @@ function updatePipeline(session){
   const state=session?.state||"ready",config=session?.config_json||{},progress=session?.progress||session?.stats||{};
   const stage=progress.stage||(state==="downloading"?"downloading":state==="preparing"?"preparing":state==="running"||state==="processing"?(Number(progress.frames_seen||0)===0?"indexing_timestamps":"analysis"):state);
   const panel=$("#processing"),steps=$$("#pipelineSteps [data-step]");panel.dataset.state=state;panel.dataset.stage=stage;
+  const labels=session?.source_type==="game"?["Capturando janela do jogo","Amostrando frames","Detectando texto nas ROIs","OCR e personagem","Salvando diálogos","Conferência rápida"]:["Download do vídeo","Processando frames (8 FPS)","Detectando regiões de texto","Executando OCR","Gerando eventos","Resultado"];
+  steps.forEach((item,index)=>{const label=item.querySelector("span");if(label)label.textContent=labels[index]||label.textContent;});
   let active=-1,done=-1;
   if(state==="downloading"){active=0;}
   else if(state==="preparing"){done=config.downloaded_path?0:-1;active=config.downloaded_path?1:0;}
@@ -709,6 +804,7 @@ function updateDownloadStatus(session){
   node.dataset.state=state;
   if(!session){node.textContent="Aguardando inicio do download.";return;}
   if(session.source_type!=="youtube"){
+    if(session.source_type==="game"){node.textContent=`Captura Real da janela ${config.window_title||config.process_name||"do jogo"} · sem áudio, com frames e OCR salvos no projeto.`;return;}
     const normalizedPath=(config.path||"").replace(/\\/g,"/"),fromYoutube=config.source_origin?.provider==="youtube"||Boolean(config.downloaded_path)||normalizedPath.toLowerCase().includes("/videos/");
     node.textContent=fromYoutube?"Vídeo baixado do YouTube · análise visual local, sem áudio.":"Arquivo local selecionado; download do YouTube não se aplica.";
     return;
@@ -784,21 +880,22 @@ async function refreshSession(){
     const duration=Number(config.duration??session.requested_duration??0),offset=Number(session.source_start??config.start??0),end=offset+duration;
     const reportedTime=Number(progress.current_source_time??session.current_source_time??offset),current=Math.max(offset,Math.min(end,Number.isFinite(reportedTime)?reportedTime:offset));
     $("#statusSourceTime").textContent=timecode(current)+" / "+timecode(end);
-    $("#statusSegment").textContent=config.block_index?`Bloco ${config.block_index}`:config.downloaded_path?"Vídeo local":session.current_segment?String(session.current_segment):"—";
+    $("#statusSegment").textContent=session.source_type==="game"?"Captura Real":config.block_index?`Bloco ${config.block_index}`:config.downloaded_path?"Vídeo local":session.current_segment?String(session.current_segment):"—";
     $("#framesCaptured").textContent=Number(progress.frames_seen??session.frames_captured??0).toLocaleString("pt-BR");
     $("#framesAnalyzed").textContent=Number(progress.frames_analyzed??0).toLocaleString("pt-BR");
     $("#effectiveFps").textContent=(session.effective_fps||progress.effective_fps)?Number(session.effective_fps||progress.effective_fps).toFixed(1):"—";
     $("#timingQuality").textContent=session.timing_quality?session.timing_quality+(session.timing_error_ms?" (±"+Math.round(session.timing_error_ms)+" ms)":""):"—";
-    $("#currentFile").textContent=config.downloaded_path?(session.current_file||config.video_title||"vídeo baixado"):(session.current_file||"—");
+    $("#currentFile").textContent=session.source_type==="game"?`${config.process_name||"Jogo"} · ${config.window_title||"janela"}`:config.downloaded_path?(session.current_file||config.video_title||"vídeo baixado"):(session.current_file||"—");
     const downloadPct=session.progress?.percent;
-    $("#segmentDurationLabel").textContent=config.downloaded_path?(config.video_width+" × "+config.video_height+" · sem áudio"):state==="downloading"&&session.progress?.download_status==="finished"?"Validando vídeo…":state==="downloading"&&Number.isFinite(downloadPct)?"Baixando "+downloadPct+"%":"Melhor qualidade";
+    $("#segmentDurationLabel").textContent=session.source_type==="game"?"Captura Real":config.downloaded_path?(config.video_width+" × "+config.video_height+" · sem áudio"):state==="downloading"&&session.progress?.download_status==="finished"?"Validando vídeo…":state==="downloading"&&Number.isFinite(downloadPct)?"Baixando "+downloadPct+"%":"Melhor qualidade";
     updateDownloadStatus(session);
     const live=["downloading","running","processing","paused"].includes(state),youtube=session.source_type==="youtube";
     $("#pauseButton").disabled=!(youtube&&state==="processing")||state==="paused";
     $("#stopButton").disabled=!(youtube&&["downloading","preparing","processing","paused"].includes(state));
+    updateRuntimeCaptureControls(session);
     $("#previewToggle").disabled=$("#videoPlayer").classList.contains("hidden");updatePreviewToggle();updatePlaybackButton();
-    $("#captureStatusBadge").textContent=state==="downloading"?"BAIXANDO VÍDEO":(state==="processing"||state==="running")?"ANÁLISE DO ARQUIVO LOCAL":state==="pausing"?"SALVANDO PAUSA":state==="paused"?"ANÁLISE PAUSADA":state==="preparing"&&config.downloaded_path?"VÍDEO LOCAL · PRONTO PARA CALIBRAR":state.toUpperCase();
-    $("#previewOverlayState").classList.toggle("hidden",!live);updatePipeline(session);updateAnalysisActivity(session);updateNextBlockControl();if(["running","processing"].includes(state)&&Date.now()-lastEventRefreshAt>1800){lastEventRefreshAt=Date.now();void refreshEvents(true);}if(state==="complete"&&previousState!=="complete"){void refreshEvents(true);showBlockCompleteChoice(session);}if(state==="complete")void maybeAutoStartNextBlock();
+    $("#captureStatusBadge").textContent=session.source_type==="game"?"CAPTURA REAL · JOGO":state==="downloading"?"BAIXANDO VÍDEO":(state==="processing"||state==="running")?"ANÁLISE DO ARQUIVO LOCAL":state==="pausing"?"SALVANDO PAUSA":state==="paused"?"ANÁLISE PAUSADA":state==="preparing"&&config.downloaded_path?"VÍDEO LOCAL · PRONTO PARA CALIBRAR":state.toUpperCase();
+    $("#previewOverlayState").classList.toggle("hidden",!live);updatePipeline(session);updateAnalysisActivity(session);updateNextBlockControl();if(["running","processing"].includes(state)&&Date.now()-lastEventRefreshAt>1800){lastEventRefreshAt=Date.now();void refreshEvents(true);}if(state==="complete"&&previousState!=="complete"){void refreshEvents(true);if(session.source_type!=="game")showBlockCompleteChoice(session);}if(state==="complete"&&session.source_type!=="game")void maybeAutoStartNextBlock();
     const coverageSource=youtube?(config.url||session.source_uri):"";
     if(coverageSource){const force=state==="complete"&&coverageCompleteSession!==session.session_id;if(force)coverageCompleteSession=session.session_id;void loadCoverage(coverageSource,force);}else $("#coveragePanel").classList.add("hidden");
     if(config.downloaded_path){await activateDownloadedFile(session);loadSessionPlayer(session);}else if(config.path){loadSessionPlayer(session);if(mode==="file")$("#filePath").value=config.path;}
@@ -1409,6 +1506,12 @@ $("#planNextVideo").addEventListener("click",()=>void planNextVideo());
 $("#videoSectorSelect").addEventListener("change",()=>void selectVideoSector());
 $("#followDialogue").setAttribute("aria-pressed",String(followDialogue));$("#followDialogue").classList.toggle("active",followDialogue);$("#followDialogue").addEventListener("click",()=>{followDialogue=!followDialogue;localStorage.setItem("dubsync.followDialogue",String(followDialogue));$("#followDialogue").setAttribute("aria-pressed",String(followDialogue));$("#followDialogue").classList.toggle("active",followDialogue);$("#followDialogue").title=followDialogue?"Seleção automática ativa: seleciona quando o cursor cruza o ponto circular de início do diálogo. Clique para desativar.":"Ativar seleção automática ao cruzar o ponto circular de início do diálogo na timeline.";if(followDialogue)updateTimelinePlayback($("#videoPlayer").currentTime);});
 $$(".source-tab[data-mode]").forEach((tab)=>tab.addEventListener("click",()=>setMode(tab.dataset.mode)));
+$("#refreshRuntimeWindows").addEventListener("click",()=>void refreshRuntimeWindows());
+$("#startRuntimeCapture").addEventListener("click",()=>void beginRuntimeCapture());
+$("#pauseRuntimeCapture").addEventListener("click",()=>void toggleRuntimePause());
+$("#stopRuntimeCapture").addEventListener("click",()=>void stopRuntimeCapture());
+$("#calibrateRuntimeRoi").addEventListener("click",()=>void calibrateRuntimeRoi());
+$("#runtimeGameWindow").addEventListener("change",()=>updateRuntimeCaptureControls());
 $("#selectCaptureButton").addEventListener("click",()=>{if(!preview||!["desktop","youtube"].includes(previewKind))return toast("Clique em Play para abrir a prévia do vídeo.",true);if(selectedDesktopRect){selectedDesktopRect=null;previewMode="capture";$("#captureStatusBadge").textContent="SELECIONE O RECORTE";drawPreview();}$("#selectCaptureButton").classList.add("active");$("#addRoiButton").classList.remove("active");});
 $("#addRoiButton").addEventListener("click",()=>{if(!preview)return toast("Prepare uma prévia primeiro.",true);if(["desktop","youtube"].includes(previewKind)&&!selectedDesktopRect)return toast("Selecione primeiro a área do vídeo.",true);previewMode=previewMode==="new-roi"?"roi":"new-roi";$("#selectCaptureButton").classList.remove("active");$("#addRoiButton").classList.toggle("active",previewMode==="new-roi");$("#addRoiButton").textContent=previewMode==="new-roi"?"✓ Concluir novas ROIs":"⌖ Adicionar região de diálogo (ROI)";toast(previewMode==="new-roi"?"Arraste para desenhar uma nova ROI.":"Arraste uma ROI para mover; use o canto para redimensionar.");});
 $("#playButton").addEventListener("click",()=>{if(!sessionHydrated||preparePending)return;if(persistentFilePauseAvailable&&currentSession?.source_type==="file"&&currentSession.state==="paused")return openFileResumeDialog();if(persistentFilePauseAvailable&&currentSession?.source_type==="file"&&currentSession.state==="running")return pauseFileAnalysis();if(currentSession?.state==="paused")return sessionAction("resume");if(currentSession?.state==="preparing"&&currentSession.config_json?.downloaded_path){if(!currentSession.ready_for_calibration)return toast("Aguardando o vídeo terminar de preparar.");if(currentSession.config_json?.analysis_started)return toast("A análise deste vídeo já foi iniciada.");if(!preview)return toast("Aguarde a prévia local e ajuste as ROIs.",true);return beginYoutube();}if(mode==="file"){if(activeState())return toast("Encerre ou aguarde a sessão atual antes de analisar outro arquivo.",true);return beginFile();}if(activeState())return toast("Aguarde ou encerre a sessão atual antes de iniciar outro download.",true);if(activeSessionId){activeSessionId="";currentSession=null;selectedDesktopRect=null;preview=null;previewKind="";$("#previewEmpty").classList.remove("hidden");clearInterval(pollTimer);clearInterval(livePreviewTimer);}return prepareYoutube();});$("#playButton").addEventListener("click",(event)=>{const config=currentSession?.config_json||{};if(currentSession?.source_type==="youtube"&&["failed","stopped"].includes(currentSession.state)&&config.mode==="youtube_download"&&!config.analysis_started){event.preventDefault();event.stopImmediatePropagation();sessionAction("resume");}},true);$("#fileResumeCancel").addEventListener("click",()=>$("#fileResumeDialog").close());$("#fileResumeContinue").addEventListener("click",()=>chooseFileResume(false));$("#fileResumeRestart").addEventListener("click",()=>chooseFileResume(true));$("#pauseButton").addEventListener("click",()=>sessionAction("pause"));$("#stopButton").addEventListener("click",()=>sessionAction("stop"));$("#previewToggle").addEventListener("click",togglePreviewPlayback);$("#seekSlider").addEventListener("input",()=>seekVideoTo(Number($("#seekSlider").value)));$("#nextSegmentButton").addEventListener("click",beginNextBlock);$("#previousBlockButton").addEventListener("click",goToPreviousBlock);
@@ -1426,7 +1529,7 @@ $("#fineSweepStartButton").addEventListener("click",startFineSweep);
 renderShortcutSettings();updateInitialRangeUi(null);renderVideoOverview();updateAnalysisActivity(null);
 $$('.detail-tab').forEach((tab)=>tab.addEventListener("click",()=>{$$('.detail-tab').forEach((item)=>item.classList.toggle("active",item===tab));$$('.detail-content').forEach((item)=>item.classList.toggle("active",item.id===`detail${tab.dataset.detailTab[0].toUpperCase()}${tab.dataset.detailTab.slice(1)}`));}));$$(".nav-item").forEach((tab)=>tab.addEventListener("click",()=>{if(window.DUBSYNC_PROJECT_ID&&tab.dataset.projectArea){if(tab.dataset.projectArea==="settings")window.DUBSYNC_SETTINGS_RETURN_URL=location.pathname.endsWith("/settings")?`/projects/${encodeURIComponent(window.DUBSYNC_PROJECT_ID)}/capture`:location.pathname;history.replaceState(null,"",`/projects/${encodeURIComponent(window.DUBSYNC_PROJECT_ID)}/${tab.dataset.projectArea}`);}if(tab.hasAttribute("data-settings-open"))return;$$(".nav-item").forEach((item)=>item.classList.toggle("active",item===tab));const inDubbing=tab.dataset.view==="dubbing";$("#appGrid").classList.toggle("hidden",inDubbing);$("#dubbingView").classList.toggle("hidden",!inDubbing);document.body.classList.toggle("dubbing-active",inDubbing);if(inDubbing){window.DubSyncDubbing?.open();return;}const target=$("#"+tab.dataset.anchor);if(target)target.scrollIntoView({behavior:"smooth",block:"nearest"});}));$("#segmentDuration").addEventListener("change",()=>$("#segmentDurationLabel").textContent=`${Number($("#segmentDuration").value)||60} segundos`);$("#youtubeUrl").addEventListener("change",()=>loadCoverage($("#youtubeUrl").value,true));$("#fitPreview").addEventListener("click",()=>drawPreview());
 function restoreSessionSettings(session){
-  const config=session.config_json||{},next=config.downloaded_path||session.source_type==="file"?"file":"youtube",start=Number(config.start??session.source_start??0),duration=Number(config.duration??session.requested_duration??900);
+  const config=session.config_json||{},next=session.source_type==="game"?"game":(config.downloaded_path||session.source_type==="file"?"file":"youtube"),start=Number(config.start??session.source_start??0),duration=Number(config.duration??session.requested_duration??900);
   setMode(next,Boolean(config.downloaded_path));$("#youtubeUrl").value=config.url||session.source_uri||"";$("#filePath").value=config.downloaded_path||config.path||"";
   $("#sourceStart").value=timecode(start);$("#sourceDuration").value=timecode(start+duration);$("#language").value=session.language||"en";
   $("#segmentDuration").value=String(config.segment_duration_seconds||60);$("#nextBlockMinutes").value=String(Math.max(1,Number(config.block_duration_requested||1200)/60));

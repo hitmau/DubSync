@@ -556,6 +556,16 @@ class DubSyncStore:
             if row:
                 row.config_json = config
 
+    def extend_session_duration(self, session_id: str, duration: float) -> None:
+        """Grow an open-ended live session timeline without changing earlier capture times."""
+        with self.Session.begin() as db:
+            row = db.get(SessionRecord, session_id)
+            if row and float(duration) > float(row.requested_duration or 0):
+                row.requested_duration = float(duration)
+                config = dict(row.config_json or {})
+                config["duration"] = float(duration)
+                row.config_json = config
+
     def session(self, session_id: str) -> dict | None:
         with self.Session() as db:
             statement = select(SessionRecord).where(SessionRecord.session_id == session_id)

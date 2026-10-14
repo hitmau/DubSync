@@ -98,11 +98,33 @@ def validate_regions(items: list[dict] | None) -> list[dict]:
         speaker_region = box(item["speaker_region"], "Área do nome do personagem") if item.get("speaker_region") else None
         if speaker_enabled and not speaker_region:
             raise ValueError("Marque a área onde aparece o nome do personagem.")
+        character_detection = item.get("character_detection") or {}
+        color_rules = []
+        if len(character_detection.get("color_rules", [])) > 32:
+            raise ValueError("Use no máximo 32 regras de cor por ROI.")
+        for rule in character_detection.get("color_rules", [])[:32]:
+            name = str(rule.get("name", "")).strip()[:120]
+            color = str(rule.get("color", "")).strip()
+            if not name or not re.fullmatch(r"#[0-9a-fA-F]{6}", color):
+                raise ValueError("Cada regra de cor precisa de personagem e cor hexadecimal válidos.")
+            try:
+                tolerance = float(rule.get("tolerance", 100))
+            except (TypeError, ValueError) as exc:
+                raise ValueError("A tolerância de cor deve ser um número entre 0 e 441.") from exc
+            if not math.isfinite(tolerance) or not 0 <= tolerance <= 441:
+                raise ValueError("A tolerância de cor deve ficar entre 0 e 441.")
+            color_rules.append({"name": name, "color": color.upper(), "tolerance": tolerance})
+        character_detection = {
+            "enabled": bool(character_detection.get("enabled", False)),
+            "prefix_before_colon": bool(character_detection.get("prefix_before_colon", True)),
+            "color_rules": color_rules,
+        }
         result.append({**spec, "name": str(item.get("name", f"area-{index + 1}"))[:48],
                        "roi_id": str(item.get("roi_id") or uuid.uuid4())[:96],
                        "lifetime": {"enabled": bool(lifetime.get("enabled")), "windows": windows},
                        "motion": {"enabled": bool(motion.get("enabled")), "keyframes": keyframes},
-                       "speaker_enabled": speaker_enabled, "speaker_region": speaker_region})
+                       "speaker_enabled": speaker_enabled, "speaker_region": speaker_region,
+                       "character_detection": character_detection})
     return result
 
 
