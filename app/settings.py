@@ -47,6 +47,7 @@ DEFAULT_SETTINGS = {
     "review": {
         "show_split_preview": True,
         "permanent_discard": False,
+        "confirm_dialogue_removal": True,
     },
     "dubbing": {
         "provider": "omnivoice",
@@ -121,6 +122,7 @@ def sanitize_settings(value: dict | None) -> dict:
         result["review"].update({
             "show_split_preview": bool(review.get("show_split_preview", True)),
             "permanent_discard": bool(review.get("permanent_discard", False)),
+            "confirm_dialogue_removal": bool(review.get("confirm_dialogue_removal", True)),
         })
     dubbing = value.get("dubbing", {})
     if isinstance(dubbing, dict):

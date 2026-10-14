@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import os
 import re
+import shutil
 import time
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
@@ -15,8 +17,10 @@ from ..capture.session_manager import DATA_DIR
 from ..app.settings import load_settings
 from ..database.models import SessionRecord
 from ..providers.omnivoice import OmniVoiceError, OmniVoiceProvider
-from .audio import ALLOWED_AUDIO_SUFFIXES, MAX_REFERENCE_BYTES, extract_video_audio, normalize_reference
+from ..projects.context import current_project_id, reset_project_context, set_project_context
+from .audio import ALLOWED_AUDIO_SUFFIXES, MAX_REFERENCE_BYTES, apply_voice_effect, data_path, extract_video_audio, normalize_reference, wav_duration_ms
 from .service import DubbingError, DubbingService, new_id
+from .voice_design import validate_voice_design
 
 
 class LineChanges(BaseModel):
@@ -70,9 +74,11 @@ class VoiceProfileBody(BaseModel):
     voice_mode: str = Field(default="clone", pattern=r"^(clone|design)$")
     default_speed: float = Field(default=1, ge=0.5, le=2)
     default_instruct: str = Field(default="", max_length=2000)
+    default_direction: str = Field(default="", max_length=2000)
     preset_key: str | None = Field(default=None, max_length=160)
     reference_text: str | None = Field(default=None, max_length=4000)
     preview_text: str = Field(default="", max_length=1000)
+    voice_effect: str = Field(default="none", pattern=r"^(none|raspy|robotic)$")
     generation_settings: GenerationSettings = Field(default_factory=GenerationSettings)
     use_authorized: bool = False
 
@@ -84,6 +90,16 @@ class ProfileActivityBody(BaseModel):
 class VoicePreviewBody(BaseModel):
     text: str = Field(min_length=1, max_length=1000)
     instruct: str = Field(default="", max_length=2000)
+    speed: float = Field(default=1, ge=0.5, le=2)
+    voice_effect: str = Field(default="none", pattern=r"^(none|raspy|robotic)$")
+    generation_settings: GenerationSettings = Field(default_factory=GenerationSettings)
+
+
+class VoiceDesignCandidatesBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    text: str = Field(min_length=1, max_length=1000)
+    instruct: str = Field(min_length=1, max_length=2000)
+    count: int = Field(default=3, ge=1, le=10)
     speed: float = Field(default=1, ge=0.5, le=2)
     generation_settings: GenerationSettings = Field(default_factory=GenerationSettings)
 
@@ -152,8 +168,77 @@ def _safe_reference_name(filename: str) -> str:
     return suffix
 
 
-def create_router(service: DubbingService, worker, docker) -> APIRouter:
+def create_router(service: DubbingService, worker, docker, auto_publish_callback=None) -> APIRouter:
     router = APIRouter(prefix="/api/dubbing", tags=["dubbing"], dependencies=[Depends(_local_request)])
+    design_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="dubsync-voice-design")
+
+    def run_design_batch(project_id: str, voice_profile_id: str, batch_id: str) -> None:
+        token = set_project_context(project_id)
+        try:
+            config = load_settings()["dubbing"]
+            provider = OmniVoiceProvider(config["base_url"], config["timeout_seconds"])
+            variations = (
+                {"class_temperature": 0.35, "position_temperature": 3},
+                {"class_temperature": 0.75, "position_temperature": 5},
+                {"class_temperature": 1.15, "position_temperature": 7},
+            )
+            for candidate in service.design_candidates_in_batch(voice_profile_id, batch_id):
+                temp_path = None
+                try:
+                    profile = service.profile(voice_profile_id)
+                    take_id = new_id("TAKE")
+                    output_relative = f"temp/omnivoice/previews/{take_id}.wav"
+                    temp_path = service.data_root / "temp" / "omnivoice" / "previews" / f"{take_id}.wav"
+                    settings = dict(candidate["generation_settings_json"] or {})
+                    settings.update(variations[(candidate["candidate_index"] - 1) % len(variations)])
+                    queued = provider.generate({
+                        "take_id": take_id, "voice_profile_id": voice_profile_id,
+                        "voice_mode": "design", "text": candidate["text_used"],
+                        "language": profile["language"].split("-")[0].lower(),
+                        "speed": candidate["speed_used"], "instruct": candidate["instruct_used"],
+                        "generation_settings": settings, "output_relative_path": output_relative,
+                    })
+                    service.update_design_candidate(candidate["candidate_id"], status="generating",
+                                                     take_id=take_id, provider_job_id=queued["job_id"])
+                    deadline = time.monotonic() + max(60, min(1800, int(config["timeout_seconds"])))
+                    while time.monotonic() < deadline:
+                        job = provider.job(queued["job_id"], timeout=min(10, int(config["timeout_seconds"])))
+                        if job.get("status") == "completed":
+                            audio = provider.audio(take_id, timeout=min(180, int(config["timeout_seconds"])))
+                            destination = data_path(service.data_root, candidate["audio_path"])
+                            destination.parent.mkdir(parents=True, exist_ok=True)
+                            destination.write_bytes(audio)
+                            duration_ms = wav_duration_ms(destination)
+                            service.update_design_candidate(candidate["candidate_id"], status="completed",
+                                                             duration_ms=duration_ms, error_message=None)
+                            break
+                        if job.get("status") == "error":
+                            raise OmniVoiceError(job.get("error") or "O OmniVoice não conseguiu gerar esta variação.",
+                                                503, "candidate_generation_failed")
+                        time.sleep(1)
+                    else:
+                        raise OmniVoiceError("O tempo para gerar este candidato foi excedido.", 504, "candidate_timeout")
+                except Exception as error:
+                    if temp_path:
+                        temp_path.unlink(missing_ok=True)
+                    try:
+                        candidate_path = data_path(service.data_root, candidate["audio_path"])
+                        candidate_path.unlink(missing_ok=True)
+                    except (KeyError, ValueError, OSError):
+                        pass
+                    message = str(error)[:600] or "Falha ao gerar este candidato."
+                    service.update_design_candidate(candidate["candidate_id"], status="error", error_message=message)
+                    if isinstance(error, OmniVoiceError) and error.code == "provider_offline":
+                        for pending in service.design_candidates_in_batch(voice_profile_id, batch_id):
+                            if pending["status"] == "queued":
+                                service.update_design_candidate(pending["candidate_id"], status="error",
+                                                                 error_message="OmniVoice offline; inicie o serviço e gere novos candidatos.")
+                        break
+                finally:
+                    if temp_path:
+                        temp_path.unlink(missing_ok=True)
+        finally:
+            reset_project_context(token)
 
     @router.get("/overview")
     def overview(session_id: str | None = None):
@@ -342,6 +427,95 @@ def create_router(service: DubbingService, worker, docker) -> APIRouter:
             if normalized: normalized.unlink(missing_ok=True)
             raise HTTPException(422, {"code": "audio_processing_failed", "message": str(error)}) from error
 
+    @router.post("/voice-profiles/{voice_profile_id}/design-candidates", status_code=202)
+    def enqueue_voice_design_candidates(voice_profile_id: str, body: VoiceDesignCandidatesBody):
+        try:
+            profile = service.profile(voice_profile_id)
+            status = OmniVoiceProvider(load_settings()["dubbing"]["base_url"],
+                                       load_settings()["dubbing"]["timeout_seconds"]).model_status()
+            if not status.get("model_loaded"):
+                raise OmniVoiceError("O modelo OmniVoice ainda está carregando.", 503, "model_loading")
+            batch = service.create_design_candidates(
+                voice_profile_id, body.text, body.instruct, body.count, body.speed,
+                body.generation_settings.model_dump(exclude_none=True),
+            )
+            try:
+                design_executor.submit(run_design_batch, current_project_id(), voice_profile_id, batch["batch_id"])
+            except RuntimeError as error:
+                for candidate in batch["items"]:
+                    service.update_design_candidate(candidate["candidate_id"], status="error",
+                                                     error_message="Não foi possível iniciar a fila local de candidatos.")
+                raise HTTPException(503, "A fila local de candidatos não está disponível.") from error
+            return {**batch, "profile": profile}
+        except DubbingError as error:
+            _raise_dubbing_error(error)
+        except OmniVoiceError as error:
+            raise HTTPException(error.status_code or 503,
+                                {"code": error.code, "message": str(error)}) from error
+
+    @router.get("/voice-profiles/{voice_profile_id}/design-candidates")
+    def list_voice_design_candidates(voice_profile_id: str, limit: int = Query(default=100, ge=1, le=500)):
+        try:
+            return {"items": service.list_design_candidates(voice_profile_id, limit)}
+        except DubbingError as error:
+            _raise_dubbing_error(error)
+
+    @router.get("/voice-profiles/{voice_profile_id}/design-candidates/{candidate_id}/audio")
+    def play_voice_design_candidate(voice_profile_id: str, candidate_id: str):
+        try:
+            candidate = service.design_candidate(voice_profile_id, candidate_id)
+            if candidate["status"] != "completed" or not candidate.get("audio_path"):
+                raise DubbingError("voice_candidate_not_ready", "Este candidato ainda não tem áudio pronto.", 409)
+            path = data_path(service.data_root, candidate["audio_path"])
+            if not path.is_file():
+                raise DubbingError("voice_candidate_audio_missing", "O arquivo deste candidato não está disponível.", 404)
+            return FileResponse(path, media_type="audio/wav", filename=f"{candidate_id}.wav",
+                                headers={"Cache-Control": "private, no-store"})
+        except DubbingError as error:
+            _raise_dubbing_error(error)
+
+    @router.post("/voice-design-candidates/cleanup-official")
+    def cleanup_official_design_auditions():
+        try:
+            return service.cleanup_official_design_auditions()
+        except DubbingError as error:
+            _raise_dubbing_error(error)
+
+    @router.post("/voice-profiles/{voice_profile_id}/design-candidates/{candidate_id}/select", status_code=201)
+    def select_persisted_design_candidate(voice_profile_id: str, candidate_id: str):
+        original = normalized = None
+        try:
+            profile = service.profile(voice_profile_id)
+            candidate = service.design_candidate(voice_profile_id, candidate_id)
+            if candidate["status"] != "completed" or not candidate.get("audio_path"):
+                raise DubbingError("voice_candidate_not_ready", "Aguarde este candidato ficar pronto antes de escolhê-lo.", 409)
+            source = data_path(service.data_root, candidate["audio_path"])
+            if not source.is_file():
+                raise DubbingError("voice_candidate_audio_missing", "O áudio deste candidato não está disponível.", 404)
+            ref_id = new_id("REF")
+            ref_dir = service.project_data_root / "voices" / voice_profile_id / "refs"
+            ref_dir.mkdir(parents=True, exist_ok=True)
+            original = ref_dir / f"{ref_id}_candidate.wav"
+            normalized = ref_dir / f"{ref_id}.wav"
+            shutil.copyfile(source, original)
+            metadata = normalize_reference(original, normalized)
+            return service.select_design_candidate(
+                voice_profile_id, original, normalized, metadata, candidate["text_used"],
+                f"Candidato persistido {candidate_id} escolhido como voz oficial.",
+            )
+        except DubbingError as error:
+            if original: original.unlink(missing_ok=True)
+            if normalized: normalized.unlink(missing_ok=True)
+            _raise_dubbing_error(error)
+        except ValueError as error:
+            if original: original.unlink(missing_ok=True)
+            if normalized: normalized.unlink(missing_ok=True)
+            raise HTTPException(400, {"code": "invalid_audio", "message": str(error)}) from error
+        except RuntimeError as error:
+            if original: original.unlink(missing_ok=True)
+            if normalized: normalized.unlink(missing_ok=True)
+            raise HTTPException(422, {"code": "audio_processing_failed", "message": str(error)}) from error
+
     @router.post("/voice-profiles/{voice_profile_id}/preview")
     async def preview_voice_profile(voice_profile_id: str, body: VoicePreviewBody):
         def synthesize() -> bytes:
@@ -359,23 +533,32 @@ def create_router(service: DubbingService, worker, docker) -> APIRouter:
                 raise OmniVoiceError("O modelo OmniVoice ainda está carregando.", 503, "model_loading")
             take_id = new_id("TAKE")
             reference_path = None
-            if profile["voice_mode"] == "clone":
+            # Keep the profile in design mode; reuse its chosen generated audio
+            # as a reference so previews match the production voice.
+            use_official_voice = profile["voice_mode"] == "clone" or (
+                profile.get("provider_voice_key") == "dubsync:design-candidate" and profile.get("ready")
+            )
+            if use_official_voice:
                 reference_path = (service.data_root / str(reference.get("normalized_path") or "")).resolve()
                 if not reference_path.is_relative_to(service.project_data_root.resolve()) or not reference_path.is_file():
                     raise DubbingError("voice_reference_missing", "O áudio de referência local não está disponível.", 404)
                 provider.prepare_voice(
                     profile["voice_profile_id"],
-                    reference_path.relative_to(service.project_data_root.resolve()).as_posix(),
+                    reference_path.relative_to(service.data_root.resolve()).as_posix(),
                     reference.get("reference_text"), profile["language"],
                 )
             output_relative = f"temp/omnivoice/previews/{take_id}.wav"
             queued = provider.generate({
                 "take_id": take_id, "voice_profile_id": profile["voice_profile_id"],
-                "voice_mode": profile["voice_mode"], "text": body.text.strip(),
+                "voice_mode": "clone" if use_official_voice else "design", "text": body.text.strip(),
                 "language": profile["language"].split("-")[0].lower(), "speed": body.speed,
-                "instruct": body.instruct.strip() or ("" if profile.get("provider_voice_key") == "dubsync:design-candidate"
-                                                       else profile.get("default_instruct", "")),
-                "generation_settings": body.generation_settings.model_dump(exclude_none=True) or profile.get("generation_settings_json", {}),
+                "instruct": "" if use_official_voice else validate_voice_design(
+                    body.instruct.strip() or profile.get("default_instruct", "")
+                ),
+                "generation_settings": {
+                    **(body.generation_settings.model_dump(exclude_none=True) or profile.get("generation_settings_json", {})),
+                    **({"position_temperature": 0.0, "class_temperature": 0.0} if use_official_voice else {}),
+                },
                 "output_relative_path": output_relative,
             })
             deadline = time.monotonic() + max(60, min(600, int(config["timeout_seconds"])))
@@ -383,7 +566,8 @@ def create_router(service: DubbingService, worker, docker) -> APIRouter:
                 while time.monotonic() < deadline:
                     job = provider.job(queued["job_id"], timeout=10)
                     if job.get("status") == "completed":
-                        return provider.audio(take_id, timeout=120)
+                        raw_audio = provider.audio(take_id, timeout=120)
+                        return apply_voice_effect(raw_audio, body.voice_effect)
                     if job.get("status") == "error":
                         raise OmniVoiceError(job.get("error") or "A prévia OmniVoice falhou.", 503, "preview_failed")
                     time.sleep(1)
@@ -398,6 +582,8 @@ def create_router(service: DubbingService, worker, docker) -> APIRouter:
             _raise_dubbing_error(error)
         except OmniVoiceError as error:
             raise HTTPException(error.status_code or 503, {"code": error.code, "message": str(error)}) from error
+        except ValueError as error:
+            raise HTTPException(422, {"code": "invalid_voice_design", "message": str(error)}) from error
 
     @router.post("/voice-references/extract", status_code=201)
     async def extract_reference(body: ReferenceExtractionBody):
@@ -453,7 +639,7 @@ def create_router(service: DubbingService, worker, docker) -> APIRouter:
         try:
             return service.create_take(line_id, body.occurrence_id, body.voice_profile_id,
                                       body.instruct, body.speed, body.manual_override,
-                                      body.generation_settings)
+                                      body.generation_settings.model_dump(exclude_none=True))
         except DubbingError as error:
             _raise_dubbing_error(error)
 
@@ -468,6 +654,22 @@ def create_router(service: DubbingService, worker, docker) -> APIRouter:
     @router.get("/queue")
     def queue_state(session_id: str | None = None, batch_id: str | None = None):
         return {**service.queue_snapshot(session_id, batch_id), "paused": worker.is_paused()}
+
+    @router.post("/batches/{batch_id}/publish")
+    def publish_completed_batch(batch_id: str):
+        try:
+            result = service.publish_completed_batch(batch_id)
+            if auto_publish_callback is None:
+                service.set_take_publication_status(result["take_ids"], "publish_error",
+                                                    "Sincronização automática com o jogo não configurada.")
+                return {**result, "publication": {"status": "not_ready"}}
+            publication = auto_publish_callback(service.project_id)
+            if publication.get("status") != "queued":
+                service.set_take_publication_status(result["take_ids"], "publish_error",
+                    publication.get("message") or "Não foi possível enfileirar a sincronização com o jogo.")
+            return {**result, "publication": publication}
+        except DubbingError as error:
+            _raise_dubbing_error(error)
 
     @router.post("/queue/{action}")
     def queue_action(action: str, session_id: str | None = None, batch_id: str | None = None):
@@ -493,7 +695,13 @@ def create_router(service: DubbingService, worker, docker) -> APIRouter:
     @router.post("/takes/{take_id}/review")
     def review_take(take_id: str, body: TakeReviewBody):
         try:
-            return service.review_take(take_id, body.action, body.note)
+            result = service.review_take(take_id, body.action, body.note)
+            if auto_publish_callback is not None and result.get("status") in {"approved", "rejected"}:
+                try:
+                    result["runtime_publish"] = auto_publish_callback(service.project_id)
+                except Exception:
+                    result["runtime_publish"] = {"status": "not_queued"}
+            return result
         except DubbingError as error:
             _raise_dubbing_error(error)
 
@@ -501,7 +709,8 @@ def create_router(service: DubbingService, worker, docker) -> APIRouter:
     def take_audio(take_id: str):
         try:
             path = service.audio_file(take_id)
-            return FileResponse(path, media_type="audio/wav", filename=f"{take_id}.wav")
+            return FileResponse(path, media_type="audio/wav", filename=f"{take_id}.wav",
+                                content_disposition_type="inline")
         except DubbingError as error:
             _raise_dubbing_error(error)
 

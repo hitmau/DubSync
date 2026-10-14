@@ -37,6 +37,7 @@ function settingsFormValue() {
     review: {
       show_split_preview: $("#cfgSplitPreview").checked,
       permanent_discard: $("#cfgPermanentDiscard").checked,
+      confirm_dialogue_removal: $("#cfgConfirmDialogueRemoval").checked,
     },
     dubbing: {
       base_url: $("#cfgDubbingBaseUrl").value,
@@ -86,7 +87,8 @@ function fillSettingsForm(data) {
   $("#cfgSampleCount").value = calibration.sample_count ?? 6;
   $("#cfgSplitPreview").checked = review.show_split_preview ?? true;
   $("#cfgPermanentDiscard").checked = review.permanent_discard ?? false;
-  window.setPermanentDiscardEnabled?.(review.permanent_discard ?? false);
+  $("#cfgConfirmDialogueRemoval").checked = review.confirm_dialogue_removal ?? true;
+  window.setPermanentDiscardEnabled?.(review.permanent_discard ?? false, review.confirm_dialogue_removal ?? true);
   $("#cfgDubbingBaseUrl").value = dubbing.base_url ?? "http://127.0.0.1:8015";
   $("#cfgDubbingTimeout").value = dubbing.timeout_seconds ?? 600;
   $("#cfgDubbingAutoStart").checked = dubbing.auto_start_docker ?? false;

@@ -10,11 +10,11 @@ decidido e o que ainda precisa ser verificado.
 | **Arquivo**        | DubSync_Documento_Mestre_Contexto_Handoff.md                                   |
 |--------------------|----------------------------------------------------------------------------------|
 | **Versao inicial** | 1.0                                                                              |
-| **Versao atual** | 1.5 |
+| **Versao atual** | 1.6 |
 | **Ultima verificacao do codigo** | 07/10/2026 |
 | **Data inicial**   | 06/10/2026                                                                       |
 | **Projeto**        | C:\Users\hitma\Documents\GitHub\leitor_legendas\Dupsync                          |
-| **Git no checkout inspecionado** | `.git` ausente na pasta Dupsync e na raiz do workspace em 07/10/2026 |
+| **Git no checkout inspecionado** | Repositorio inicializado em `Dupsync`; HEAD `b4159e4` em 07/10/2026. As anotacoes antigas de ausencia de `.git` registram apenas o estado das revisoes anteriores. |
 | **Regra**          | Cada desenvolvedor atualiza ESTE MESMO arquivo e o devolve ao final da sua fase. |
 
 **NAO guardar senhas, tokens, chaves de API ou credenciais neste
@@ -114,7 +114,7 @@ arquivo depois de inspecionar o codigo real.</p></th>
 
 ## 1.1 Objetivo geral e estado atual do DubSync
 
-DubSync e uma aplicacao local para catalogar dialogos visualmente, revisar as ocorrencias e produzir takes de dublagem antes de uma futura integracao com jogos. O codigo atual implementa a base do aplicativo, a Fase 1 de captura/revisao visual e a Fase 2 de producao de takes. A integracao runtime da Fase 3 e a execucao durante a gameplay da Fase 4 continuam planejadas; nao devem ser descritas como funcionalidades prontas.
+DubSync e uma aplicacao local para catalogar dialogos visualmente, revisar as ocorrencias e produzir takes de dublagem para jogos. O codigo atual implementa a base do aplicativo, a Fase 1 de captura/revisao visual, a Fase 2 de producao de takes e uma Fase 3 em implementacao. No piloto REPLACED, o callback real do jogo ja aciona um pacote de teste por meio de um reprodutor externo. A integracao de audio dentro do jogo e a Fase 4 continuam pendentes; nao devem ser descritas como funcionalidades prontas.
 
 | **Fase** | **Papel** | **Saida principal** | **Estado confirmado no codigo** |
 |----------|-----------|---------------------|---------------------------------|
@@ -130,7 +130,7 @@ DubSync e uma aplicacao local para catalogar dialogos visualmente, revisar as oc
 
 - Manter separados fala canonica (`line_id`), ocorrencia (`occurrence_id`) e vinculo ao evento de captura (`event_id` via `capture_links`). Esses conceitos ja existem no schema atual.
 
-- O provider da Fase 2 gera masters WAV. Conversoes para formatos de runtime e empacotamento pertencem a uma futura Fase 3 e nao devem sobrescrever o master.
+- O provider da Fase 2 gera masters WAV. A Fase 3 ja converte para OGG/WAV e empacota takes aprovados sem sobrescrever o master; a reproducao integrada ao jogo ainda nao esta pronta.
 
 - Plugins/adaptadores sao infraestrutura planejada para a integracao; o jogo e a entidade que o usuario configura.
 
@@ -147,10 +147,10 @@ DubSync e uma aplicacao local para catalogar dialogos visualmente, revisar as oc
 | OCR e ROI | O OCR atual e PaddleOCR chamado na analise de quadros de video. ROIs proporcionais ao frame sao implementadas na UI web e aplicadas pelo detector/processador. | VERIFICADO; nao e OCR de gameplay em tempo real |
 | Captura de tela | `mss` e usado por `desktop_preview()` como pre-visualizacao do monitor. A analise de falas usa fontes de video, nao um capturador de gameplay ativo. | VERIFICADO |
 | TTS legado | Nenhum TTS em tempo real do LeitorLegendas e chamado pelo DubSync. A geracao de takes atual e a Fase 2, via provider OmniVoice local. | VERIFICADO |
-| Persistencia | Um SQLite (`Dupsync/.data/dubsync.sqlite3`) via SQLAlchemy atende os projetos; sessoes, eventos e personagens ROI sao escopados por projeto. `database/store.py` cria tabelas ausentes e aplica migracoes incrementais inline, com `PRAGMA user_version` ate v6 e `schema_migrations`. Configuracoes ficam em `.data/settings.json`; dados locais em `.data/` sao ignorados pelo Git. | VERIFICADO NO CODIGO; versao do banco real nao consultada |
+| Persistencia | Um SQLite (`Dupsync/.data/dubsync.sqlite3`) via SQLAlchemy atende os projetos; sessoes, eventos e personagens ROI sao escopados por projeto. `database/store.py` cria tabelas ausentes e aplica migracoes incrementais inline, com `PRAGMA user_version` ate v9 e `schema_migrations`. Configuracoes ficam em `.data/settings.json`; dados locais em `.data/` sao ignorados pelo Git. | VERIFICADO NO CODIGO; versao do banco real nao consultada |
 | Contexto de projeto | Hub em `/`; area do projeto em `/projects/{project_id}/{area}`. Middleware verifica o projeto e exige contexto (`X-DubSync-Project` ou `project_id`) nas APIs do projeto; o armazenamento continua no banco SQLite compartilhado. | VERIFICADO |
 | Retomada de captura | Analise de arquivo local salva ponto de pausa, totais e identidade do video na sessao. Depois de reiniciar o servidor, bloco pausado pode continuar do checkpoint ou ser apagado e reiniciado; somente eventos daquele bloco sao removidos na segunda opcao. | VERIFICADO NO CODIGO; nao confundir com pausa do YouTube |
-| Estado Git deste checkout | Nao foi encontrado `.git` em `Dupsync` nem na raiz do workspace examinado; `git status`/branch/commit nao estao disponiveis neste checkout. | VERIFICADO EM 07/10/2026; confirmar ao receber outro checkout |
+| Estado Git deste checkout | `Dupsync` e um repositorio Git; HEAD `b4159e4` (`Initial DubSync project structure`). Ha mudancas locais nao commitadas da Fase 3 e da interface. | VERIFICADO EM 07/10/2026 |
 
 ## 2.1 Mapa do codigo, execucao e dependencias
 
@@ -159,7 +159,7 @@ DubSync e uma aplicacao local para catalogar dialogos visualmente, revisar as oc
 - **Versao e contexto:** a aplicacao FastAPI declara `0.2.0`. `require_project_context` valida projetos e define o contexto usado por sessoes, eventos, assets e demais operacoes; chamadas de projeto precisam carregar o ID do projeto, salvo rotas globais explicitamente liberadas.
 - **Captura e ROIs:** `capture/models.py` (`FramePacket`, protocolo `FrameSource`); `capture/file_source.py` (`FileVideoSource`); `capture/youtube_source.py` (`YoutubeFrameSource`); `capture/session_manager.py` (sessoes, download, analise, preview); `detector/visual.py` (`Region`, geometria/vida/movimento da ROI e detector visual); `review_ui/static/roi.js` (editor web de ROI).
 - **OCR e eventos:** `ocr/engine.py` (`OcrEngine` PaddleOCR lazy); `ocr/preprocess.py`; `events/processor.py`, `events/tracker.py` e `events/dedup.py`.
-- **Banco:** `database/models.py` e `database/store.py`; a funcao `_migrate_schema()` aplica migracoes incrementais inline, sem uma pasta Alembic. O codigo aceita schema ate v6 e recusa abrir schema mais novo. A inicializacao chama `Base.metadata.create_all()` antes das migracoes. Tabelas definidas atualmente: `capture_sessions`, `dialogue_events`, `review_history`, `fine_sweep_runs`, `timeline_markers`, `roi_characters`, `schema_migrations`, `projects`, `project_text_replacement_settings`, `game_builds`, `characters`, `voice_profiles`, `voice_reference_assets`, `scenes`, `routes`, `scene_edges`, `capture_traversals`, `dialogue_lines`, `dialogue_occurrences`, `capture_links`, `audio_takes`, `tts_jobs`, `audio_take_review_history` e `interpretation_presets`. Isto descreve o schema definido pelo codigo, nao confirma quais tabelas/migracoes existem no banco local.
+- **Banco:** `database/models.py` e `database/store.py`; a funcao `_migrate_schema()` aplica migracoes incrementais inline, sem uma pasta Alembic. O codigo aceita schema ate v9 e recusa abrir schema mais novo. A inicializacao chama `Base.metadata.create_all()` antes das migracoes. A v9 adiciona `default_direction` para salvar a direcao padrao de geracao separada dos atributos que definem a identidade da voz. Tabelas definidas atualmente incluem `voice_design_candidates` para resultados de candidatos de voz, alem de `capture_sessions`, `dialogue_events`, `review_history`, `fine_sweep_runs`, `timeline_markers`, `roi_characters`, `schema_migrations`, `projects`, `project_text_replacement_settings`, `game_builds`, `characters`, `voice_profiles`, `voice_reference_assets`, `scenes`, `routes`, `scene_edges`, `capture_traversals`, `dialogue_lines`, `dialogue_occurrences`, `capture_links`, `audio_takes`, `tts_jobs`, `audio_take_review_history` e `interpretation_presets`. Isto descreve o schema definido pelo codigo, nao confirma quais tabelas/migracoes existem no banco local.
 - **Versoes de schema presentes no codigo:** v1 `fase1_legacy_baseline` registra a base de captura preexistente; v2 `fase2_dubbing_additive` registra as tabelas aditivas da dublagem; v3 `omnivoice_local_profiles` adiciona metadados de perfil/configuracao de voz; v4 `fase0_project_hub` adiciona contexto de projeto e associa sessoes/ROIs a projetos, cria o projeto legado `replaced` quando necessario; v5 `dubbing_batch_tracking` adiciona rastreio de lotes de TTS; v6 `voice_profile_preview_text` adiciona texto de previa ao perfil de voz. O codigo verifica colunas antes de `ALTER TABLE` e registra versoes em `schema_migrations`; isso e evidencia da logica de migracao, nao da versao do arquivo `.data/dubsync.sqlite3` desta maquina.
 - **Arquivos de dados e configuracao:** `.data/dubsync.sqlite3` e `.data/settings.json` sao locais; `.env.local` e usado para `OPENAI_API_KEY`. O `.gitignore` exclui `.data/`, `.env.local`, `.venv/` e arquivos de banco. Nao apagar nem recriar `.data/` para corrigir problema de schema; primeiro inspecionar o banco existente e fazer backup antes de qualquer alteracao manual.
 - **Pausa persistente de arquivo:** `POST /api/file/{session_id}/pause`, `/resume` e `/restart` controlam a analise de arquivo local. O checkpoint e guardado no `config_json` da sessao, validando tamanho e `mtime` do video antes de retomar. A recuperacao de sessoes preserva o estado pausado ao iniciar o servidor. A opcao reiniciar limpa os eventos somente da sessao/bloco selecionado. A interface usa `persistent_file_pause` em `/api/health` para detectar se o backend carregado oferece esse fluxo. Nao inferir que a pausa persistente de arquivo tambem se aplica ao fluxo YouTube.
@@ -167,7 +167,7 @@ DubSync e uma aplicacao local para catalogar dialogos visualmente, revisar as oc
 - **Dependencias Python fixadas:** `requirements.txt`: FastAPI 0.142.2, Uvicorn 0.54.0, Jinja2 3.1.6, SQLAlchemy 2.0.54, OpenCV Contrib 4.10.0.84, RapidFuzz 3.14.6, MSS 10.2.0, yt-dlp[default] 2026.8.19 e PaddleOCR 3.7.0. `setup.ps1` exige Python 3.13 x64 e instala PaddlePaddle CPU 3.2.2. Node.js 22+ e FFmpeg/ffprobe sao ferramentas externas.
 - **Lacuna de instalacao a resolver:** os fluxos YouTube e varios scripts de smoke importam Playwright, e ele esta instalado no `.venv` inspecionado, mas nao consta em `requirements.txt`/`setup.ps1`; o setup tambem nao declara a instalacao do Chromium do Playwright. Uma instalacao limpa pode nao reproduzir esses fluxos.
 - **Binario do launcher:** `Dupsync/DubSyncLauncher.exe` esta presente neste checkout; o fonte C# e `launcher/build.ps1` ficam em `launcher/`. O script de build grava o EXE na raiz de `Dupsync`, que e o caminho usado pelo README.
-- **Documentacao divergente:** o primeiro paragrafo do `README.md` ainda descreve um milestone sem geracao de voz, embora o modulo Fase 2 atual exista; o tutorial do README tambem conserva alguns nomes/fluxos de UI anteriores. `dubbing/README.md` afirma `PRAGMA user_version=2`, mas o codigo atual migra ate v6. Para comportamento e schema, prevalecem o codigo e o banco realmente inspecionado; os READMEs precisam ser alinhados em uma revisao propria.
+- **Documentacao divergente:** o primeiro paragrafo do `README.md` ainda descreve um milestone sem geracao de voz, embora o modulo Fase 2 atual exista; o tutorial do README tambem conserva alguns nomes/fluxos de UI anteriores. `dubbing/README.md` afirma `PRAGMA user_version=2`, mas o codigo atual migra ate v9. Para comportamento e schema, prevalecem o codigo e o banco realmente inspecionado; os READMEs precisam ser alinhados em uma revisao propria.
 - **Testes existentes:** `Dupsync/tests/test_*.py` sao testes `unittest`; os arquivos `*_smoke.py` sao smoke tests de UI/Playwright. A partir da raiz do workspace, o comando de descoberta e `.\Dupsync\.venv\Scripts\python.exe -m unittest discover -s Dupsync\tests -t .`. Esse comando nao foi executado nesta atualizacao do handoff.
 
 **Comando de setup:** em `Dupsync`, `.\setup.ps1` cria `.venv`, instala PaddlePaddle CPU e `requirements.txt`. O app e local, mas o launcher pode escutar em `0.0.0.0` para acesso na rede local; o firewall descrito no README e restrito a rede/perfil privados. Nao exponha essa porta em rede publica.
@@ -194,9 +194,9 @@ Rotas principais do hub: `GET/POST /api/projects`, `GET/PATCH /api/projects/{id}
 - **Health:** `/api/health` informa `ok`, disponibilidade de FFmpeg/ffprobe/Node/yt-dlp, FPS alvo/analise e suporte a pausa persistente de arquivo. `ok` nao significa que o video ou OCR foram processados com sucesso.
 - **Configuracoes persistentes:** `app/settings.py` le e grava `.data/settings.json` atomicamente e limita/normaliza valores recebidos; os grupos atuais sao `detection`, `preprocess`, `ocr`, `calibration`, `review`, `dubbing` e `appearance`. `OPENAI_API_KEY` pode vir de `.env.local`; a API/UI nao retorna o segredo.
 - **Limites das configuracoes:** `analysis_fps` 2–15; limiar medio de mudanca 0,2–20; fracao de pixels alterados 0,001–0,2; OCR periodico 0,25–8 s; observacoes estaveis/ausentes 1–8. Preprocessamento aceita `fast`, `balanced` ou `thorough`; contraste 0,5–2,5, brilho -80–80, limiar 40–245 e morfologia 0–5. OCR aceita confianca 0,05–0,95 e lado maximo de deteccao 640–2560 px. Revisao controla preview da divisao e descarte permanente. Dublagem restringe o endpoint OmniVoice a loopback (`127.0.0.1`/`localhost`/`[::1]` na porta 8015), timeout 30–1800 s e formato master WAV 24 kHz mono. Estes limites sao aplicados pelo sanitizador mesmo se o JSON local tiver valores invalidos.
-- **Cuidado com dados:** `.data/` e ignorado pelo Git. Guarda SQLite, ajustes, cache PaddleOCR, sessoes, frames/crops, videos de origem e arquivos de projeto. O codigo de migracao e ate v6, mas o `PRAGMA user_version` do banco ativo nao foi consultado em 07/10/2026. Antes de qualquer alteracao manual, copiar o banco e verificar schema/tabelas existentes. Nenhuma limpeza ou migracao manual foi feita nesta revisao.
+- **Cuidado com dados:** `.data/` e ignorado pelo Git. Guarda SQLite, ajustes, cache PaddleOCR, sessoes, frames/crops, videos de origem e arquivos de projeto. O codigo de migracao e ate v9, mas o `PRAGMA user_version` do banco ativo nao foi consultado nesta revisao. Antes de qualquer alteracao manual, copiar o banco e verificar schema/tabelas existentes. Nenhuma limpeza ou migracao manual foi feita nesta revisao.
 - **Fora da Fase 0:** `mss.desktop_preview()` fornece uma imagem do monitor para ajuste/preview; a captura de dialogos usa arquivo/video e ROIs, nao captura gameplay ao vivo. A analise visual nao extrai audio. Dublagem via OmniVoice e Fase 2; runtime integrado ao jogo ainda nao esta implementado.
-- **Documentacao a alinhar depois:** o inicio de `README.md` ainda diz que o primeiro milestone nao gera voz, apesar da Fase 2 atual; partes do tutorial tambem usam rotulos antigos. `dubbing/README.md` ainda informa schema v2, embora `database/store.py` aplique ate v6. Estes READMEs nao foram alterados neste pedido.
+- **Documentacao a alinhar depois:** o inicio de `README.md` ainda diz que o primeiro milestone nao gera voz, apesar da Fase 2 atual; partes do tutorial tambem usam rotulos antigos. `dubbing/README.md` ainda informa schema v2, embora `database/store.py` aplique ate v9. Estes READMEs nao foram alterados neste pedido.
 
 ### 2.4 Ciclo de inicializacao e diagnostico
 
@@ -448,7 +448,7 @@ O contrato implementado inclui `/health`, `/v1/model/status`, `/v1/monitoring`, 
 | Inicio/parada/status do contêiner | Dupsync/providers/docker.py | OmniVoiceDocker usa Docker Compose isolado; auto start esta desligado por padrao. |
 | API, fila e geracao do modelo | Dupsync/docker/omnivoice/app/api.py, jobs.py, model_service.py, schemas.py | Servico FastAPI incluido localmente; usa k2-fsa/OmniVoice. |
 | Compose e imagem | Dupsync/docker/omnivoice/docker-compose.yml, Dockerfile | Publica somente em 127.0.0.1:8015 e monta dados/cache locais. |
-| UI e comportamento | Dupsync/review_ui/templates/index.html, static/dubbing.js, static/dubbing.css | Lista Falas e Ocorrencias, Take Studio, personagens, perfis, preview sincronizado, producao/fila, ajustes e historico de takes. |
+| UI e comportamento | Dupsync/review_ui/templates/index.html, static/dubbing.js, static/dubbing.css | Lista Falas e Ocorrencias, Take Studio, personagens, perfis, pre-candidatos persistidos, preview sincronizado, producao/fila, ajustes e historico de takes. |
 | Configuracao | Dupsync/app/settings.py | base_url permitida em loopback:8015, timeout limitado, auto_start_docker=false e master_format fixado como wav_24khz_mono (este ultimo nao e aplicado ao master pelo worker). |
 
 ### Persistencia, entidades e migrations
@@ -458,6 +458,7 @@ O SQLite configurado fica em Dupsync/.data/dubsync.sqlite3; o estado e os arquiv
 - DubbingCharacter (tabela characters): character_id estavel, projeto, vinculo legacy_character_profile_id com ROI, default_voice_profile_id, nome, display_name, aliases_json, verificacao do nome e active.
 - VoiceProfile: character_id, provider/provider_voice_key, voice_mode, idioma, referencia ativa, texto de referencia/preview, velocidade, instrucao, parametros, autorizacao e status.
 - VoiceReferenceAsset: perfil, caminhos original/normalizado, duracao, taxa/canais/codec, texto, origem, qualidade e SHA-256.
+- VoiceDesignCandidate: lote e indice, estado (fila/gerando/pronto/erro), texto/instrucao/configuracoes usados e caminho/duracao do WAV candidato; o arquivo fica em `voices/{voice_profile_id}/candidates/`.
 - DialogueLine: texto OCR de origem e texto para dublagem, personagem, direcao, emocao/intensidade, idiomas e editorial_status; identidade canonica de fala e line_id.
 - DialogueOccurrence: occurrence_id, line_id, alvo de duracao, cena/rota, condicoes e campos previstos para gatilho de runtime.
 - CaptureLink: liga ocorrencia a event_id/session_id e tempos da fonte. A sincronizacao de correcoes da Captura atualiza o texto espelhado sem sobrescrever adaptacao de dublagem manual, conforme a logica/teste existente.
@@ -466,7 +467,7 @@ O SQLite configurado fica em Dupsync/.data/dubsync.sqlite3; o estado e os arquiv
 - AudioTakeReview (tabela audio_take_review_history): trilha de aprovar, rejeitar e substituicao de aprovacao.
 - InterpretationPreset: instrucoes reutilizaveis de emocao/intensidade no projeto.
 
-O schema e definido por SQLAlchemy e database/store.py chama create_all e depois migrations inline, sem Alembic. O codigo reconhece ate PRAGMA user_version=6: v2 registra o baseline aditivo de Dublagem; v3 adiciona configuracoes/perfil vocal e settings do take; v4 adiciona escopo de projeto e campos do hub; v5 adiciona rastreio de lote aos TtsJobs; v6 adiciona preview_text ao perfil. README.md dentro de dubbing ainda fala em user_version=2 e esta desatualizado; nao o usar para inferir o schema atual.
+O schema e definido por SQLAlchemy e database/store.py chama create_all e depois migrations inline, sem Alembic. O codigo reconhece ate PRAGMA user_version=9: v2 registra o baseline aditivo de Dublagem; v3 adiciona configuracoes/perfil vocal e settings do take; v4 adiciona escopo de projeto e campos do hub; v5 adiciona rastreio de lote aos TtsJobs; v6 adiciona preview_text; v7 registra a base do runtime do plugin de jogo; v8 registra a geracao persistida de candidatos de voz; v9 adiciona direcao padrao ao perfil vocal. README.md dentro de dubbing ainda fala em user_version=2 e esta desatualizado; nao o usar para inferir o schema atual.
 
 ### API do DubSync usada pela tela
 
@@ -477,10 +478,11 @@ Todas as rotas abaixo usam o prefixo /api/dubbing. A API rejeita clientes que na
 | GET /overview; GET /lines; GET /lines/{line_id} | Indicadores, lista filtravel por sessao/status/personagem/busca e detalhe de fala/ocorrencia. |
 | PUT /lines/{line_id} | Persiste dub_text, character_id, emotion, emotion_intensity e direction. |
 | POST/PUT /characters; PUT /characters/{id}/voice-profile; GET /characters/{id}/roi-audio; POST /characters/{id}/import-roi-audio | Cadastro/edicao/associacao e leitura/importacao do audio do ROI. Existe alias legado import-roi-mp3 oculto do schema OpenAPI. |
+| POST/GET /voice-profiles/{id}/design-candidates; GET /voice-profiles/{id}/design-candidates/{candidate_id}/audio; POST /voice-profiles/{id}/design-candidates/{candidate_id}/select | Enfileira de 1 a 10 copias, lista/reproduz os candidatos persistidos e escolhe um como referencia oficial. A fila local segue sem depender da tela aberta; os resultados ficam associados ao perfil/personagem. |
 | POST /voice-profiles; PUT /voice-profiles/{id}; PUT /voice-profiles/{id}/active; DELETE /voice-profiles/{id}; DELETE /voice-profiles/{id}/reference; POST /voice-profiles/{id}/sync-roi-audio | Ciclo de vida do perfil, autorizacao/ativacao, troca de referencia e sincronizacao do ROI. |
 | POST /voice-profiles/{id}/references | Upload do corpo de audio; query filename e reference_text opcionais; WAV, MP3, M4A, AAC, FLAC, OGG ou OPUS. Normaliza via FFmpeg. |
-| POST /voice-profiles/{id}/generated-reference | Recebe WAV de candidato escolhido no modo design; persiste asset oficial e o liga ao perfil autorizado. |
-| POST /voice-profiles/{id}/preview | Sintese temporaria sincrona; devolve audio/wav para teste de perfil e pre-candidatos. |
+| POST /voice-profiles/{id}/generated-reference | Recebe WAV de candidato escolhido no modo design; persiste asset oficial e o liga ao perfil autorizado. Continua disponivel para clientes existentes; a UI usa a rota persistida de selecao abaixo. |
+| POST /voice-profiles/{id}/preview | Sintese temporaria sincrona; devolve audio/wav para teste curto do perfil. A geracao de candidatos agora usa uma fila de fundo persistida. |
 | POST /voice-references/extract; POST /voice-references/{id}/approve | Extrai intervalo de audio de uma sessao de video e permite aprovar qualidade de referencia fora de 3–10 s. |
 | POST /lines/{line_id}/takes | Gera/enfileira take individual (HTTP 202). |
 | POST /batch | Enfileira selecionadas, personagem no bloco, bloco, pendentes ou personagem no video (HTTP 202). |
@@ -489,7 +491,7 @@ Todas as rotas abaixo usam o prefixo /api/dubbing. A API rejeita clientes que na
 | GET/POST /presets; GET /export; GET /runtime-manifest | Presets, exportacao JSON/CSV de roteiro e manifesto de rascunho. |
 | GET /provider; POST /provider/{start,stop,restart} | Estado e controle do Compose OmniVoice. Comandos Docker retornam inicio em segundo plano; isso nao prova modelo carregado. |
 
-Principais payloads: LineChanges aceita somente campos definidos (dub_text ate 4000 chars, character_id, emotion, intensidade 0..1, direction ate 2000); TakeBody leva occurrence_id, perfil opcional, instrucao, velocidade 0.5..2, manual_override e generation_settings; BatchBody aceita ate 500 occurrence_ids e ate 5000 session_ids; TakeReviewBody recebe action approve/reject e nota ate 1000. VoiceProfileBody inclui personagem, nome, idioma, modo clone/design, default_speed, instrucao, preset, textos de referencia/preview, generation_settings e consentimento use_authorized. Campos extras sao rejeitados nos schemas marcados extra=forbid.
+Principais payloads: LineChanges aceita somente campos definidos (dub_text ate 4000 chars, character_id, emotion, intensidade 0..1, direction ate 2000); TakeBody leva occurrence_id, perfil opcional, instrucao, velocidade 0.5..2, manual_override e generation_settings; BatchBody aceita ate 500 occurrence_ids e ate 5000 session_ids; TakeReviewBody recebe action approve/reject e nota ate 1000. VoiceProfileBody inclui personagem, nome, idioma, modo clone/design, default_speed, atributos default_instruct, direcao padrao default_direction, preset, textos de referencia/preview, generation_settings e consentimento use_authorized. Campos extras sao rejeitados nos schemas marcados extra=forbid.
 
 ### Fila, worker e ciclo do take
 
@@ -505,7 +507,10 @@ O character_id do DubSync e a identidade estavel. O cadastro e inicialmente espe
 
 Os modos de perfil sao:
 - clone: usa referencia autorizada anexada no ROI ou upload; salvar perfil de clonagem pode importar/sincronizar o audio do ROI. Pode-se extrair trecho do audio de uma sessao de video. A referencia original e a normalizada sao mantidas.
-- design: o usuario descreve genero/idade/pitch/estilo/ritmo/textura e instrucao. A UI chama tres previews locais, permite ouvir e escolher uma. A escolhida precisa durar 3–10 s; e normalizada e salva como referencia oficial. O perfil passa a usar essa referencia como identidade para takes futuros (provider_voice_key dubsync:design-candidate). Isto e desenho de voz por prompt + selecao de amostra do OmniVoice; nao e treinamento/fine-tuning de um modelo novo.
+- design: o usuario seleciona genero, idade, pitch e estilo em listas. Esses controles correspondem as categorias oficiais documentadas pelo OmniVoice (`male/female`, cinco faixas etarias, cinco pitches e `whisper`; deixar em automatico omite a categoria). A interface e traduzida para pt-BR, mas envia os valores canonicos em ingles no `instruct`. A documentacao upstream aceita instrucoes em ingles ou chines; sotaques sao efetivos somente para fala em ingles e, por isso, nao aparecem no formulario pt-BR. O modelo foi treinado para desenho de voz em ingles e chines e pode generalizar para outras linguas com resultados instaveis: as opcoes nao garantem a mesma identidade/efeito em fala pt-BR. Fontes: [Voice Design do OmniVoice](https://github.com/k2-fsa/OmniVoice/blob/master/docs/voice-design.md) e [README do projeto](https://github.com/k2-fsa/OmniVoice#voice-design).
+- Os antigos campos livres de ritmo, textura e descricao nao eram controles enumerados na documentacao do modelo. Foram substituidos por seletores dinamicos fechados, sem repetir a mesma opcao. Esses complementos sao enviados como frases de instrucao em ingles, mas estao identificados como experimentais e sem garantia para pt-BR; nao devem ser descritos como atributos oficialmente suportados. Instrucoes antigas de perfis sao preservadas como etiquetas removiveis ate que o usuario as descarte.
+- A quantidade de candidatos e configuravel de 1 a 10. A fila continua em uma thread do servidor mesmo quando o usuario sai da tela; cada estado e caminho de audio ficam no SQLite/arquivos do projeto e, ao abrir o perfil/personagem novamente, a lista permite ouvir candidatos prontos e escolher um. A thread e sequencial, acompanhando o unico worker do OmniVoice. Essa garantia cobre navegar entre telas enquanto o servidor esta ativo; reinicio/crash do servidor durante a geracao nao e retomada automatica documentada.
+- Selecionar um candidato copia o WAV persistido para a pasta de referencias, normaliza e associa como referencia oficial; o audio ainda precisa ter 3–10 s para servir como identidade estavel. O perfil usa essa referencia nos takes futuros (`provider_voice_key=dubsync:design-candidate`). Isto e desenho por prompt e selecao de amostra, nao treinamento/fine-tuning de modelo.
 
 Em ambos os modos, o nome do personagem precisa estar confirmado e use_authorized deve ser explicitamente true. Referencia curta recomendada: 3–10 s; arquivo aceito de 0,5–60 s, mas fora da faixa recebe needs_review e exige aprovacao. Remover referencia limpa a associacao no perfil; excluir perfil e bloqueado quando ha takes associados, preservando o historico usado.
 
@@ -514,7 +519,8 @@ Em ambos os modos, o nome do personagem precisa estar confirmado e use_authorize
 - Banco: Dupsync/.data/dubsync.sqlite3 (caminho configurado; banco desta maquina nao consultado).
 - Dados por projeto: Dupsync/.data/projects/{slug}/dubbing/; para o slug replaced, raiz .data/projects/replaced/dubbing/.
 - Masters: audio/{occurrence_id_sanitizado}/{take_id}.wav. Arquivo e relativo ao data_root e audio_master_path guarda o relativo.
-- Temporario do provider: temp/omnivoice/{take_id}.wav; removido depois que master e gravado.
+- Temporario do provider: temp/omnivoice/previews/{take_id}.wav para previews/candidatos; removido depois de copiar o resultado persistente. O caminho dos takes finais e gerenciado pelo worker de Dublagem.
+- Candidatos de desenho: voices/{voice_profile_id}/candidates/{candidate_id}.wav; estado/metadados em voice_design_candidates. Remover perfil sem takes remove esses arquivos; perfil com historico de take e apenas inativado.
 - Referencias: voices/{voice_profile_id}/refs/, com original e copia normalizada; asset registra caminhos relativos ao data_root.
 - Logs: logs/jobs.jsonl no projeto; compose em logs/omnivoice-compose.log. O worker omite texto completo/referencia do log de job.
 - Cache do modelo: Dupsync/.data/omnivoice-model-cache/. A URL padrao local e 127.0.0.1:8015 e o Compose a mapeia para a porta 8000 interna. auto_start_docker e false por padrao; modelo, GPU/CPU e disponibilidade precisam de verificacao runtime.
@@ -546,7 +552,7 @@ Smoke manual recomendado, tambem nao executado nesta atualizacao:
 | jobs/queue | Dupsync/dubbing/jobs.py + DubbingService; SQLite com job sequencial, batch, progresso, pause/resume, cancelamento e retry limitado. |
 | takes | database/models.py AudioTake + AudioTakeReview; WAV imutavel por versão, revisao, aprovacao/rejeicao/historico. |
 | personagens/vozes | DubbingCharacter, VoiceProfile, VoiceReferenceAsset; identidade ancorada no ROI e consentimento explicito. |
-| models/migrations | database/models.py e database/store.py; SQLAlchemy create_all + migrations inline ate schema v6; v5 lotes, v6 preview_text. |
+| models/migrations | database/models.py e database/store.py; SQLAlchemy create_all + migrations inline ate schema v9; v5 lotes, v6 preview_text, v7 base do runtime, v8 candidatos de voz persistidos, v9 direcao padrao do perfil. |
 | UI Dublagem | review_ui/templates/index.html, static/dubbing.js, static/dubbing.css, static/dubbing-dock.js e static/dubbing-layout.css; usa arvore de divisao 2D e gerente de layouts nomeados compartilhado. |
 | tests | tests/test_dubbing_blocks.py e tests/test_dubbing_roi_bridge.py; comandos e limites descritos acima, sem execucao nesta revisao. |
 
@@ -561,7 +567,7 @@ Smoke manual recomendado, tambem nao executado nesta atualizacao:
 <tr class="header">
 <th></th>
 <th><p><strong>ESTADO</strong></p>
-<p>Esta fase e PLANEJADA; o codigo atual nao implementa plugin/adaptador de jogo nem execucao runtime. Existe uma especificacao dedicada da Fase 3. Este documento guarda os contratos e decisoes que as Fases 0, 1 e 2 precisam conhecer para nao bloquear uma implementacao futura.</p></th>
+<p>Esta fase esta em IMPLEMENTACAO. O contrato do adaptador REPLACED, o empacotador e o checklist de testes existem no codigo; um plugin BepInEx IL2CPP foi criado e instalado de forma reversivel. Os hooks em SubtitlesManager.InitLine/ReleaseLine foram chamados durante falas reais. O ExternalId veio vazio, mas o ID numerico do DialogueFragment foi confirmado em sessoes diferentes. Tres takes aprovados foram mapeados e empacotados; um reprodutor temporario externo tocou os OGG acionados pelos eventos do jogo. O jogador confirmou as tres falas corretas e audiveis. O runtime de audio dentro do jogo, a mixagem e o gate de 10 falas continuam pendentes.</p></th>
 </tr>
 </thead>
 <tbody>
@@ -573,12 +579,20 @@ Smoke manual recomendado, tambem nao executado nesta atualizacao:
 | Entidade principal da UI | Jogo. Plugins nao ficam permanentemente em uma coluna paralela.                                        |
 | Plugins                  | Possuem area/submenu proprio para instalar, atualizar, habilitar, remover e inspecionar.               |
 | Vinculo                  | Cada jogo seleciona/configura seu plugin/adaptador ativo; um plugin generico pode servir varios jogos. |
-| REPLACED                 | Piloto planejado via Unity IL2CPP + Articy; hipotese sujeita a prova no runtime do jogo.           |
+| REPLACED                 | Piloto via Unity IL2CPP + Articy; hooks e chamadas reais confirmados; usa Object ID numerico validado quando ExternalId esta vazio. |
 | Trigger preferido        | ID interno/deterministico, por exemplo Articy ExternalId.                                              |
 | Fallback                 | Visual Runtime com frames/pixels/OCR/audio quando nao existir integracao interna viavel.               |
 | Empacotamento            | Fase 3 converte master para formato adequado ao plugin e gera manifesto/pacote runtime.                |
 
-**Estado dos campos no schema atual:** `dialogue_occurrences` ja contem `runtime_trigger_type`, `runtime_trigger_id`, `scene_id`, `route_id` e `condition_json`; `AudioTake` liga o take aprovado a `line_id` e `occurrence_id`. Esses campos estarem no banco nao significa que exista leitura de gatilhos do jogo, exportador de pacote ou runtime. Antes de alterar o schema, confirme `database/models.py`, `database/store.py` e a versao do banco real.
+**Evidencia local da Fase 3.1 (07/10/2026):** Steam AppID `1663850`, build `23920604`, Unity `6000.0.63f1`; executavel `I:\SteamLibrary\steamapps\common\REPLACED\Replaced.exe`. BepInEx `6.0.0-be.788+5b766a3` iniciou no jogo; `BepInEx/LogOutput.log` registra o plugin `DubSync REPLACED Probe 0.1.0` carregado e os hooks em `SadCatStudios.Dialogs.SubtitlesManager.InitLine(ArticyRef, SpeechController, Boolean)` e `ReleaseLine()`. O ciclo real inicio/fim foi observado. Nos assemblies de interop gerados, `Articy.Unity.ArticyRef` possui `GetObject<T>()` e `Articy.Replaced.DialogueFragment` possui `ExternalId` e `Id`. O `ExternalId` veio vazio em varias falas reais; o plugin passou a usar `articy_object_id` somente quando o ID do DialogueFragment e igual ao da ArticyRef. O ID `72057649872502883` repetiu para a mesma primeira fala em duas sessoes. O manifesto local de rollback esta em `.data/replaced-probe-install.json`; esses arquivos de jogo sao locais e ignorados pelo Git.
+
+O perfil DubSync registra a build Steam `23920604` e plataforma `Windows x64`. O projeto tem 3 takes aprovados. O primeiro vinculo do ID `72057649872502883` a fala da REACH foi incorreto; o teste `TST_1775F05024C548C1` registrou `wrong_mapping`, o vinculo foi removido e o pacote `PKG_021CF99416FA4F30` ficou `stale`. Uma captura da janela do jogo sincronizada ao mesmo callback confirmou a legenda “Warren, foi registrada uma hora extra adicional.” O ID foi entao associado a ocorrencia `OCC_960FC9F4F91C` e ao take aprovado `TAKE_B980FCAF8AEA`. O pacote corrigido `PKG_5C17F426864F428E` contem um OGG Vorbis mono de 24 kHz e 3,48 s, convertido sem sobrescrever o WAV master. A API recebeu `dialogue_start` e `dialogue_end` com resolucao `matched`; `scripts/replaced_smoke_player.py` tocou o OGG com ganho temporario de +6 dB, acionado pelo evento real, e terminou com codigo 0. O jogador confirmou ouvir a voz dublada correta junto da voz original. O checklist `TST_B54E5E553E0B43E6` tem 1 inicio correto, mas status `incomplete`, pois o gate exige 10 falas. Isso comprova o caminho jogo -> plugin -> API -> pacote -> reprodutor externo; ainda nao comprova audio integrado/mixado dentro do jogo.
+
+No passe seguinte, capturas sincronizadas da janela confirmaram `72057649872502892` = “Obrigado por me lembrar pela sexta vez, REACH” (`OCC_3DBA84193B34`, `TAKE_8C14A7F1B118`) e `72057649872502899` = “Sua atividade cerebral está instável” (`OCC_3300A35AA3A4`, `TAKE_6051A24FC99D`). O pacote `PKG_E2C21EF281294CC0` contem os tres takes aprovados e seus hashes. Em 07/10/2026, a API recebeu inicio/fim `matched` para cada um dos tres IDs, e o reprodutor externo iniciou e concluiu os tres OGG com codigo 0. O jogador confirmou que as tres dublagens corresponderam as legendas e ficaram audiveis. O checklist `TST_59849A2176A44AC7` registrou 3 resultados `ok`, sem take errado observado nesse passe; o status permanece `incomplete` porque o gate exige pelo menos 10 dialogos corretos. Isto comprova o caminho jogo -> plugin -> API -> pacote -> reprodutor externo para tres falas; ainda nao comprova audio integrado/mixado dentro do jogo nem supressao da voz original.
+
+As rotas `GET/POST /api/integration/runtime/events` foram implementadas e aprovadas em `FastAPI TestClient` isolado, incluindo restricao a loopback e ausencia de persistencia do texto da legenda. O processo local em `127.0.0.1:8766` recebeu eventos reais com `articy_object_id`; rejeitou HTTP 400 para um ID numerico invalido. Os eventos registrados contem callback, gatilho e resolucao, sem texto da legenda.
+
+**Estado dos campos no schema atual:** `dialogue_occurrences` contem `runtime_trigger_type`, `runtime_trigger_id`, `scene_id`, `route_id` e `condition_json`; `AudioTake` liga o take aprovado a `line_id` e `occurrence_id`. O piloto REPLACED ja le callbacks reais e o exportador de pacote existe; o runtime de audio integrado ainda nao. Antes de alterar o schema, confirme `database/models.py`, `database/store.py` e a versao do banco real.
 
 ## 5.1 Gate de aceite do primeiro piloto
 
@@ -683,7 +697,7 @@ sao apenas um marco de passagem registrado em 06/10/2026.**
 | takes approved            | 0 no snapshot consultado                            |
 | /runtime-manifest         | Rascunho: a rota existe, mas o codigo atual retorna `runtime: not_implemented`; nao e um manifesto pronto para consumo |
 
-**Schema atual no codigo:** `database/store.py` aplica migracoes ate `PRAGMA user_version=6` e registra versoes em `schema_migrations`. O snapshot numerico acima e historico; nao foi consultado o conteudo atual do banco do usuario nesta atualizacao.
+**Schema atual no codigo:** `database/store.py` aplica migracoes ate `PRAGMA user_version=9` e registra versoes em `schema_migrations`. O snapshot numerico acima e historico e nao deve ser lido como contagem atual; o banco do usuario nao foi consultado nesta atualizacao.
 
 ## 7.2 Migration rules
 
@@ -866,8 +880,11 @@ se algo for substituido, registrar nova entrada explicando a mudanca.**
 | 07/10/2026 | Revisao Fases 0 e 1 | Codex | Refeito o detalhamento do hub, launcher, ciclo de inicio/erro, contexto e limites de configuracao/schema; na Fase 1 foram especificados fonte/tempo, pipeline, tracker, criterios de deduplicacao, progresso, campos persistidos e revisao. Nenhum teste/runtime ou SQLite executado nesta atualizacao. | sem metadados Git no checkout |
 | \_\_\_\_/\_\_\_\_/\_\_\_\_ | Fase 0            | \_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_ | \_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_ | \_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_ |
 | \_\_\_\_/\_\_\_\_/\_\_\_\_ | Fase 1            | \_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_ | \_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_ | \_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_ |
-| 07/10/2026 | Revisao Fase 2 | Codex | Preenchido mapa do codigo, API, schema v6, fila/takes, perfis e referencias, armazenamento, testes existentes e smoke recomendado; runtime OmniVoice nao foi validado. | sem metadados Git no checkout |
+| 07/10/2026 | Revisao Fase 2 | Codex | Mapa do codigo, API e schema atualizado para v8; candidatos do desenho de voz agora têm fila em segundo plano e arquivos/metadados persistidos. Runtime OmniVoice nao foi validado. | sem metadados Git no checkout |
+| 08/10/2026 | Salvamento do Take Studio | Codex | Ajustes do perfil e direcao padrao agora aguardam o botao Salvar perfil no fim do card; a sincronizacao automatica de audio ROI deixou de ocorrer ao mudar controles. Schema v9 armazena direcao padrao separada da identidade vocal. | sem metadados Git no checkout |
 | 07/10/2026 | Padrao de UI/layout | Codex | Registrados o contrato de cards encaixaveis, minimizacao horizontal/vertical, arraste para quatro lados/abas, redimensionamento, dados locais por scope, presets nomeados e a diferenca atual entre os motores da Captura e Dublagem. | sem metadados Git no checkout |
+| 07/10/2026 | Smoke REPLACED de tres falas | Codex + usuario | Tres IDs Articy capturados no jogo, mapeados a takes aprovados, reproduzidos pelo auxiliar externo e confirmados audiveis/corretos pelo jogador; checklist `TST_59849A2176A44AC7` com 3 `ok`. | Gate 3/10; audio integrado pendente |
+| 07/10/2026 | Revisao de audio na Dublagem | Codex | URLs nativas dos takes passaram a incluir o projeto; o endpoint entrega WAV inline. O botao Ouvir + revisar inicia a reproducao sem recriar o player. O card Takes desta ocorrencia ganhou uma aprovacao em lote destacada para as falas marcadas, usando o take mais recente de cada uma apos confirmacao e excluindo ocorrencias que ja tenham take aprovado. O filtro Em revisao remove aprovadas/rejeitadas mesmo quando ha versoes historicas pendentes. Reproducao no navegador e cancelamento da confirmacao em lote foram conferidos sem aprovar takes. | Fluxo de revisao corrigido; aprovacao humana permanece necessaria |
 | \_\_\_\_/\_\_\_\_/\_\_\_\_ | Fase 3            | \_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_ | \_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_ | \_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_ |
 
 # 12. Pendencias e perguntas abertas
@@ -878,8 +895,8 @@ se algo for substituido, registrar nova entrada explicando a mudanca.**
 | Fase 1   | Mapa de fontes, parametros, ROI, OCR, persistencia, revisao e endpoints foi preenchido na secao 3. Ainda falta validar um fluxo real com video e comparar tempos/quadros na interface desta maquina. | Dev Fase 1 | CODIGO MAPEADO; RUNTIME PENDENTE |
 | Fase 2 | Perfis clone/design, criacao de candidatos, fila, takes, revisao e exportacao de roteiro estao implementados no codigo; falta comprovar provider/modelo carregado, sintese real e validar taxa/canais do master, pois master_format nao e aplicado pelo worker. | Dev Fase 2 | IMPLEMENTADO NO CODIGO; PENDENTE runtime |
 | UI/layout | `layout-presets.js` e compartilhado, mas Captura e Dublagem ainda usam motores de encaixe distintos. Unificar o docking 2D e migrar a preferencia de Captura sem perder o layout existente. | Dev UI | PADRAO REGISTRADO; UNIFICACAO PENDENTE |
-| Schema | Codigo atual aceita migrations ate v6; antes da Fase 3, comparar com `PRAGMA user_version` e `schema_migrations` do banco que sera usado. `dubbing/README.md` ainda cita v2. | Dev Fase 2/3 | VERIFICADO NO CODIGO; banco a conferir |
-| REPLACED | Provar acesso ao ExternalId e lifecycle em runtime, pois a analise inicial foi estatica. | Dev Fase 3        | PENDENTE   |
+| Schema | Codigo atual aceita migrations ate v9; antes da Fase 3, comparar com `PRAGMA user_version` e `schema_migrations` do banco que sera usado. `dubbing/README.md` ainda cita v2. | Dev Fase 2/3 | VERIFICADO NO CODIGO; banco a conferir |
+| REPLACED | Ciclo real e Object IDs estaveis observados; tres falas mapeadas e reproduzidas pelo auxiliar externo, confirmadas pelo jogador; implementar audio/mixagem no jogo e ampliar a amostra. | Dev Fase 3 | SMOKE EXTERNO 3/3; GATE 3/10 |
 | Runtime  | Definir processo/IPC final do DubSyncRuntime e Game Bridge.                              | Dev Fase 3/4      | PENDENTE   |
 
 <table>

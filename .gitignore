@@ -32,6 +32,8 @@ htmlcov/
 node_modules/
 dist/
 build/
+integration/plugins/replaced-articy/runtime/bin/
+integration/plugins/replaced-articy/runtime/obj/
 
 # Local capture profiles, models, and generated recordings
 playwright-profile/

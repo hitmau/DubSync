@@ -5,6 +5,7 @@ sqlalchemy==2.0.54
 opencv-contrib-python==4.10.0.84
 rapidfuzz==3.14.6
 mss==10.2.0
+psutil==7.2.2
 yt-dlp[default]==2026.8.19
 paddleocr==3.7.0
 # Paddle CPU: installed from the official CPU wheel index in setup.ps1.

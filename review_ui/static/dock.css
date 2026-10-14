@@ -23,16 +23,24 @@
 .dock-group .panel-title,.dock-group .timeline-heading,.dock-group .table-heading,.dock-group .review-dock-title{cursor:grab;user-select:none}
 .dock-group .panel-title:active,.dock-group .timeline-heading:active,.dock-group .table-heading:active,.dock-group .review-dock-title:active,.dock-tab:active{cursor:grabbing}
 .dock-group .panel-title button,.dock-group .timeline-heading button,.dock-group .table-heading button,.dock-group .review-dock-title button{cursor:pointer}
+.dock-group>.panel.dock-locked>.panel-title,.dock-group>.panel.dock-locked>.timeline-heading,.dock-group>.panel.dock-locked>.table-heading,.dock-group>.panel.dock-locked>.review-dock-title{cursor:default}
+.dock-floating:has(.dock-locked) .panel-title,.dock-floating:has(.dock-locked) .timeline-heading,.dock-floating:has(.dock-locked) .table-heading,.dock-floating:has(.dock-locked) .review-dock-title{cursor:default}
 .dock-header-actions{display:flex;align-items:center;justify-content:flex-end;gap:4px;min-width:0;margin-left:auto}
 .dock-header-actions>.timeline-tools,.dock-header-actions>.table-tools{margin-left:0}
-.dock-collapse{flex:0 0 22px;width:22px;height:22px;display:grid;place-items:center;margin-left:6px;padding:0;border:1px solid #344e6f;border-radius:3px;background:#17283e;color:#bdd3ed;font:14px/1 var(--sans)}
+.dock-collapse,.dock-lock-toggle{flex:0 0 22px;width:22px;height:22px;display:grid;place-items:center;margin-left:6px;padding:0;border:1px solid #344e6f;border-radius:3px;background:#17283e;color:#bdd3ed}
+.dock-collapse{font:14px/1 var(--sans)}
+.dock-lock-toggle svg{width:14px;height:14px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
 .dock-collapse:hover{background:#245389;color:#fff}
+.dock-lock-toggle:hover{background:#245389;color:#fff}
+.dock-lock-toggle[aria-pressed="true"]{border-color:#6689b5;background:#1e3553;color:#e5f1ff}
+.dock-lock-toggle:focus-visible{outline:2px solid #68afff;outline-offset:-2px}
+.dock-lock-toggle:disabled,.dock-float-toggle:disabled{opacity:.45;cursor:not-allowed}
 .dock-float-toggle{flex:0 0 22px;width:22px;height:22px;display:grid;place-items:center;margin-left:6px;padding:0;border:1px solid #344e6f;border-radius:3px;background:#17283e;color:#bdd3ed;font:13px/1 var(--sans)}
 .dock-float-toggle:hover{background:#245389;color:#fff}
 .dock-collapsed{display:block!important;overflow:hidden!important;padding:0!important;min-height:32px!important;height:32px!important}
 .dock-collapsed>:not(.panel-title):not(.timeline-heading):not(.table-heading):not(.review-dock-title){display:none!important}
 .dock-collapsed .panel-title,.dock-collapsed .timeline-heading,.dock-collapsed .table-heading,.dock-collapsed .review-dock-title{height:31px;border-bottom:0}
-.dock-collapsed .dock-header-actions>:not(.dock-collapse):not(.dock-float-toggle){display:none!important}
+.dock-collapsed .dock-header-actions>:not(.dock-collapse):not(.dock-float-toggle):not(.dock-lock-toggle){display:none!important}
 .dock-collapsed.review-dock .review-dock-title>div:first-child{display:flex!important}
 .dock-collapsed.review-dock .review-dock-title>div:first-child span{display:none!important}
 .dock-divider{flex:0 0 6px;min-width:0;min-height:0;position:relative;z-index:4;display:grid;place-items:center;touch-action:none;background:transparent;border:0;padding:0;color:#9bc9fa}

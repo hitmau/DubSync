@@ -62,6 +62,8 @@
       }
       if (found.length !== ids.length || new Set(found).size !== ids.length || found.some((id) => !panels.has(id))) return null;
       if (state.collapsed && (!Array.isArray(state.collapsed) || state.collapsed.some((id) => !panels.has(id)))) return null;
+      if (state.locked && !Array.isArray(state.locked)) return null;
+      state.locked = (state.locked || []).filter((id) => panels.has(id));
       return state;
     } catch { return null; }
   }
@@ -83,8 +85,35 @@
       });
     }
     const collapsed = ids.filter((id) => panels.get(id).classList.contains("dock-collapsed"));
+    const locked = ids.filter((id) => panels.get(id).classList.contains("dock-locked"));
     const homes = Object.fromEntries(ids.map((id) => [id, panels.get(id).dataset.dockHome || "center"]));
-    try { localStorage.setItem(storageKey, JSON.stringify({ zones, collapsed, homes })); } catch { /* private browsing */ }
+    try { localStorage.setItem(storageKey, JSON.stringify({ zones, collapsed, locked, homes })); } catch { /* private browsing */ }
+  }
+
+  function isLocked(id) { return panels.get(id)?.classList.contains("dock-locked") || false; }
+
+  function updateLockControl(panel) {
+    const locked = isLocked(panel.id);
+    const button = panel.querySelector(":scope > * .dock-lock-toggle");
+    if (button) {
+      const label = locked ? `Permitir mover ${names.get(panel.id)}` : `Impedir mover ${names.get(panel.id)}`;
+      button.innerHTML = locked
+        ? '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 9.9-1"/></svg>'
+        : '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>';
+      button.title = label;
+      button.setAttribute("aria-label", label);
+      button.setAttribute("aria-pressed", String(locked));
+    }
+    const header = panelHeader(panel);
+    if (header) header.draggable = !locked && panel.parentElement?.parentElement !== zoneElements.float;
+    document.querySelectorAll(`.dock-tab[data-panel-id="${panel.id}"]`).forEach((tab) => { tab.draggable = !locked; });
+  }
+
+  function setPanelLocked(panel, locked) {
+    panel.classList.toggle("dock-locked", locked);
+    updateLockControl(panel);
+    save();
+    afterLayout();
   }
 
   function panelHeader(panel) {
@@ -106,8 +135,10 @@
       const button = panel.querySelector(":scope > * .dock-float-toggle");
       if (!button) continue;
       const floating = panel.parentElement?.parentElement === zoneElements.float;
+      const locked = isLocked(id);
       button.textContent = floating ? "▣" : "▢";
-      button.title = floating ? `Encaixar ${names.get(id)} novamente` : `Destacar ${names.get(id)} como quadro flutuante`;
+      button.disabled = locked;
+      button.title = locked ? `Desbloqueie ${names.get(id)} para mover ou destacar` : floating ? `Encaixar ${names.get(id)} novamente` : `Destacar ${names.get(id)} como quadro flutuante`;
       button.setAttribute("aria-label", button.title);
     }
     requestAnimationFrame(() => {
@@ -134,7 +165,7 @@
         tab.textContent = names.get(panel.id);
         tab.title = `Exibir ${names.get(panel.id)}; arraste para mover o painel`;
         tab.dataset.panelId = panel.id;
-        tab.draggable = true;
+        tab.draggable = !isLocked(panel.id);
         tab.setAttribute("role", "tab");
         tab.setAttribute("aria-selected", String(panel.id === id));
         tab.addEventListener("click", () => { showPanel(group, panel.id); rebuildDividers(group.parentElement); });
@@ -176,7 +207,7 @@
   function syncFloatingGroup(group) {
     const floating = group.parentElement === zoneElements.float;
     group.classList.toggle("dock-floating", floating);
-    for (const panel of group.querySelectorAll(":scope > .panel")) panelHeader(panel).draggable = !floating;
+    for (const panel of group.querySelectorAll(":scope > .panel")) updateLockControl(panel);
     if (floating && !group.querySelector(":scope > .float-resize")) {
       const grip = document.createElement("button");
       grip.type = "button";
@@ -191,6 +222,7 @@
     if (event.button !== 0) return;
     const group = event.target.closest(".dock-floating");
     if (!group || group.parentElement !== zoneElements.float) return;
+    if (!event.target.closest(".float-resize") && [...group.querySelectorAll(":scope > .panel")].some((panel) => isLocked(panel.id))) return;
     group.style.zIndex = String(++floatFront);
     const grip = event.target.closest(".float-resize");
     const header = event.target.closest(".panel-title,.timeline-heading,.table-heading,.review-dock-title");
@@ -299,7 +331,7 @@
   function startDrag(event) {
     if (event.target.closest("button:not(.dock-tab),input,select,textarea")) { event.preventDefault(); return; }
     const id = event.currentTarget.dataset.panelId;
-    if (!panels.has(id)) return;
+    if (!panels.has(id) || isLocked(id)) { event.preventDefault(); return; }
     draggingId = id;
     event.dataTransfer.effectAllowed = "move";
     event.dataTransfer.setData("text/plain", id);
@@ -316,6 +348,7 @@
 
   function movePanel(id, zone, target, place, geometry = null) {
     const panel = panels.get(id);
+    if (!panel || isLocked(id)) return;
     const sourceGroup = panel.parentElement;
     if (target === sourceGroup && (place === "tab" || sourceGroup.querySelectorAll(":scope > .panel").length === 1)) {
       showPanel(sourceGroup, id); return;
@@ -379,6 +412,12 @@
     const target = group?.parentElement === zone ? group : null;
     const place = placement(event, zone, target);
     const id = draggingId;
+    if (isLocked(id) || (target && place === "tab" && [...target.querySelectorAll(":scope > .panel")].some((panel) => isLocked(panel.id)))) {
+      clearDropHint();
+      draggingId = null;
+      document.body.classList.remove("dock-dragging");
+      return;
+    }
     clearDropHint();
     movePanel(id, zone, target, place);
     draggingId = null;
@@ -427,6 +466,14 @@
       floatButton.className = "dock-float-toggle";
       floatButton.addEventListener("click", (event) => { event.stopPropagation(); toggleFloat(id); });
       actions.append(floatButton);
+      const lockButton = document.createElement("button");
+      lockButton.type = "button";
+      lockButton.className = "dock-lock-toggle";
+      lockButton.addEventListener("click", (event) => {
+        event.stopPropagation();
+        setPanelLocked(panel, !isLocked(id));
+      });
+      actions.append(lockButton);
       const button = document.createElement("button");
       button.type = "button";
       button.className = "dock-collapse";
@@ -447,7 +494,7 @@
         save();
       });
       actions.append(button);
-      header.draggable = true;
+      header.draggable = !isLocked(id);
       header.dataset.panelId = id;
       header.title = `Arraste para mover ${names.get(id)}. Solte na borda para separar ou no centro para criar abas.`;
       header.addEventListener("dragstart", startDrag);
@@ -462,6 +509,7 @@
       button.setAttribute("aria-expanded", "false");
       button.title = button.getAttribute("aria-label");
     }
+    for (const id of restored?.locked || []) panels.get(id).classList.add("dock-locked");
     grid.classList.add("dock-enabled");
     zoneElements.float.addEventListener("pointerdown", floatPointerDown);
     zoneElements.float.addEventListener("pointermove", floatPointerMove);
@@ -471,6 +519,7 @@
       for (const group of groupChildren(zone)) showPanel(group, group.dataset.active, false);
       rebuildDividers(zone);
     }
+    for (const panel of panels.values()) updateLockControl(panel);
     document.querySelectorAll(".nav-item[data-anchor]").forEach((button) => button.addEventListener("click", () => {
       const target = document.getElementById(button.dataset.anchor);
       const panel = target?.classList.contains("panel") ? target : target?.querySelector(".panel");

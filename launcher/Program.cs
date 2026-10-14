@@ -89,12 +89,16 @@ namespace DubSyncLauncher
         private readonly LinkLabel lanAddress = new LinkLabel();
         private readonly NumericUpDown portInput = new NumericUpDown();
         private readonly Button applyPort = new Button();
+        private readonly Button serviceToggle = new Button();
+        private readonly Button restartService = new Button();
         private readonly CheckBox autoStart = new CheckBox();
         private Process serverProcess;
         private int port;
         private int startAttempts;
         private DateTime nextStart = DateTime.MinValue;
         private bool quitting;
+        private bool serviceStoppedByUser;
+        private bool serviceActionInProgress;
         private bool changingAutoStart;
         private readonly bool startHidden;
         private readonly object logLock = new object();
@@ -144,7 +148,7 @@ namespace DubSyncLauncher
             FormBorderStyle = FormBorderStyle.FixedSingle;
             MaximizeBox = false;
             StartPosition = FormStartPosition.CenterScreen;
-            ClientSize = new Size(470, 226);
+            ClientSize = new Size(470, 265);
             BackColor = Color.FromArgb(17, 28, 44);
             ForeColor = Color.White;
             Font = new Font("Segoe UI", 9F);
@@ -192,22 +196,32 @@ namespace DubSyncLauncher
             applyPort.Click += delegate { ChangePort(); };
             Controls.Add(applyPort);
 
+            serviceToggle.Text = "Parar";
+            serviceToggle.SetBounds(19, 153, 112, 30);
+            serviceToggle.Click += delegate { ToggleService(); };
+            Controls.Add(serviceToggle);
+
+            restartService.Text = "Reiniciar serviço";
+            restartService.SetBounds(139, 153, 138, 30);
+            restartService.Click += delegate { Restart(); };
+            Controls.Add(restartService);
+
             autoStart.Text = "Iniciar com o Windows";
             autoStart.AutoSize = true;
             autoStart.BackColor = BackColor;
-            autoStart.SetBounds(19, 160, 215, 24);
+            autoStart.SetBounds(19, 197, 215, 24);
             autoStart.Checked = IsAutoStartEnabled();
             autoStart.CheckedChanged += OnAutoStartChanged;
             Controls.Add(autoStart);
 
             detail.ForeColor = Color.FromArgb(169, 186, 211);
             detail.AutoEllipsis = true;
-            detail.SetBounds(19, 193, 325, 21);
+            detail.SetBounds(19, 232, 325, 21);
             Controls.Add(detail);
 
             Button finish = new Button();
             finish.Text = "Finalizar";
-            finish.SetBounds(356, 187, 95, 29);
+            finish.SetBounds(356, 226, 95, 29);
             finish.Click += delegate { Finish(); };
             Controls.Add(finish);
             UpdateAddresses();
@@ -355,24 +369,42 @@ namespace DubSyncLauncher
             tray.Text = running ? "DubSync - executando" : "DubSync - " + text;
         }
 
+        private void UpdateServiceButtons(bool running)
+        {
+            serviceToggle.Text = running ? "Parar" : "Iniciar";
+            serviceToggle.Enabled = !serviceActionInProgress;
+            restartService.Enabled = !serviceActionInProgress;
+        }
+
         private void OnTimer()
         {
             if (showEvent.WaitOne(0)) ShowWindow();
             UpdateAddresses();
+            if (serviceActionInProgress) return;
             if (ProbeHealth())
             {
                 startAttempts = 0;
                 SetStatus("Executando", true, "Fechar a janela mantém o app na bandeja.");
+                serviceStoppedByUser = false;
+                UpdateServiceButtons(true);
                 return;
             }
             if (serverProcess != null && !serverProcess.HasExited)
             {
                 SetStatus("Iniciando…", false, "Aguardando o servidor responder.");
+                UpdateServiceButtons(true);
+                return;
+            }
+            if (serviceStoppedByUser)
+            {
+                SetStatus("Parado", false, "O serviço foi parado. Clique em Iniciar quando quiser retomá-lo.");
+                UpdateServiceButtons(false);
                 return;
             }
             if (startAttempts >= 3)
             {
                 SetStatus("Falha ao iniciar", false, "Confira .data\\launcher.log ou use Reiniciar.");
+                UpdateServiceButtons(false);
                 return;
             }
             if (DateTime.UtcNow >= nextStart) StartBackend();
@@ -436,6 +468,7 @@ namespace DubSyncLauncher
                 startAttempts++;
                 nextStart = DateTime.UtcNow.AddSeconds(5);
                 SetStatus("Iniciando…", false, "Aguardando o servidor responder.");
+                UpdateServiceButtons(true);
             }
             catch (Exception error)
             {
@@ -477,15 +510,82 @@ namespace DubSyncLauncher
             return !ProbeHealth();
         }
 
-        private void Restart()
+        private void ToggleService()
         {
-            if (!StopBackend())
+            bool running = ProbeHealth();
+            if (!running && serverProcess != null)
             {
-                MessageBox.Show("Não foi possível encerrar o servidor atual.", "DubSync");
+                try { running = !serverProcess.HasExited; }
+                catch (InvalidOperationException) { }
+            }
+            if (running)
+            {
+                RunStopAction(false);
                 return;
             }
+            serviceStoppedByUser = false;
             startAttempts = 0;
             StartBackend();
+        }
+
+        private void Restart()
+        {
+            RunStopAction(true);
+        }
+
+        private void RunStopAction(bool restartAfterStop)
+        {
+            if (serviceActionInProgress) return;
+            serviceActionInProgress = true;
+            serviceToggle.Enabled = false;
+            restartService.Enabled = false;
+            SetStatus(restartAfterStop ? "Reiniciando…" : "Parando…", false,
+                "Encerrando o servidor com segurança.");
+
+            ThreadPool.QueueUserWorkItem(delegate
+            {
+                bool stopped = false;
+                Exception failure = null;
+                try { stopped = StopBackend(); }
+                catch (Exception error) { failure = error; AppendLog("Falha ao parar serviço: " + error); }
+
+                if (IsDisposed || !IsHandleCreated) return;
+                BeginInvoke((MethodInvoker)delegate
+                {
+                    serviceActionInProgress = false;
+                    if (!stopped)
+                    {
+                        serviceStoppedByUser = false;
+                        string message = failure == null
+                            ? "Não foi possível encerrar o servidor."
+                            : "Falha ao encerrar o servidor: " + failure.Message;
+                        SetStatus("Falha ao parar", false, message);
+                        UpdateServiceButtons(ProbeHealth());
+                        MessageBox.Show(message, "DubSync");
+                        return;
+                    }
+
+                    if (serverProcess != null)
+                    {
+                        serverProcess.Dispose();
+                        serverProcess = null;
+                    }
+                    startAttempts = 0;
+                    if (restartAfterStop)
+                    {
+                        serviceStoppedByUser = false;
+                        StartBackend();
+                        SetStatus("Reiniciando…", false, "Aguardando o servidor responder.");
+                        UpdateServiceButtons(true);
+                    }
+                    else
+                    {
+                        serviceStoppedByUser = true;
+                        SetStatus("Parado", false, "O serviço foi parado. Clique em Iniciar quando quiser retomá-lo.");
+                        UpdateServiceButtons(false);
+                    }
+                });
+            });
         }
 
         private bool UpdateFirewall(int newPort)
@@ -539,6 +639,7 @@ namespace DubSyncLauncher
                 return;
             }
             applyPort.Enabled = false;
+            serviceStoppedByUser = true;
             SetStatus("Alterando porta…", false, "O Windows solicitará acesso para ajustar o firewall.");
             try
             {
@@ -562,6 +663,7 @@ namespace DubSyncLauncher
                 portInput.Value = port;
                 applyPort.Enabled = true;
                 startAttempts = 0;
+                serviceStoppedByUser = false;
                 StartBackend();
             }
         }

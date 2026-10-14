@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import subprocess
+import tempfile
 from pathlib import Path, PurePosixPath
 
 
@@ -101,3 +102,36 @@ def wav_duration_ms(path: Path) -> int:
         "format=duration", "-of", "default=noprint_wrappers=1:nokey=1", str(path),
     ])
     return round(float(probe.stdout.strip()) * 1000)
+
+
+def apply_voice_effect(audio_bytes: bytes, effect: str | None) -> bytes:
+    """Apply an optional local finishing effect to a generated WAV."""
+    selected = str(effect or "none").strip().lower()
+    if selected == "none":
+        return audio_bytes
+    filters = {
+        # Mild saturation and a focused midrange suggest vocal rasp without
+        # altering the clean, official reference stored on the profile.
+        "raspy": "highpass=f=90,lowpass=f=7200,equalizer=f=1800:t=q:w=1:g=2,asoftclip=threshold=0.72:oversample=4",
+        # Downsampled texture plus amplitude modulation gives a deliberately
+        # synthetic, game-radio character.
+        "robotic": "highpass=f=150,lowpass=f=4200,acrusher=bits=10:mode=log:aa=1:mix=0.28,tremolo=f=26:d=0.68",
+    }
+    audio_filter = filters.get(selected)
+    if not audio_filter:
+        raise ValueError("O acabamento vocal selecionado não é válido.")
+    if not audio_bytes:
+        raise ValueError("O áudio a processar está vazio.")
+    with tempfile.TemporaryDirectory(prefix="dubsync-voice-effect-") as temp_dir:
+        source = Path(temp_dir) / "source.wav"
+        destination = Path(temp_dir) / "finished.wav"
+        source.write_bytes(audio_bytes)
+        _run([
+            "ffmpeg", "-hide_banner", "-loglevel", "error", "-y", "-i", str(source),
+            "-vn", "-af", audio_filter, "-ac", "1", "-ar", "24000",
+            "-c:a", "pcm_s16le", str(destination),
+        ])
+        result = destination.read_bytes()
+        if len(result) <= 44:
+            raise RuntimeError("O acabamento vocal produziu um áudio vazio.")
+        return result

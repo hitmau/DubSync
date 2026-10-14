@@ -5,7 +5,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>DubSync — Integração · {{ project.game_title or project.name }}</title>
   <link rel="icon" type="image/svg+xml" href="/static/dubsync-icon.svg?v=20261004">
-  <link rel="stylesheet" href="/static/integration.css?v=20261007-1">
+  <link rel="stylesheet" href="/static/integration.css?v=20261008-1">
+  <link rel="stylesheet" href="/static/shared-nav.css?v=20261007-2">
   <script>
     window.DUBSYNC_PROJECT_ID = {{ project.project_id|tojson }};
     window.DUBSYNC_PROJECT = {{ project|tojson }};
@@ -26,29 +27,29 @@
   </script>
 </head>
 <body>
-  <header class="integration-topbar">
-    <a class="brand" href="/" aria-label="DubSync, hub de projetos"><img src="/static/dubsync-icon.svg" alt=""><span><b>DubSync</b><small>DUBLAGEM DE JOGOS</small></span></a>
-    <nav class="phase-nav" aria-label="Fases do DubSync">
-      <a href="/projects/{{ project.project_id }}/capture">Captura</a>
-      <a href="/projects/{{ project.project_id }}/review">Revisão</a>
-      <a href="/projects/{{ project.project_id }}/dubbing">Dublagem</a>
-      <a class="active" href="/projects/{{ project.project_id }}/integration" aria-current="page">Integração</a>
-      <span class="future-phase" title="Fase 4: execução durante a jogatina">Hora da Jogatina</span>
+  <header class="appbar">
+    <div class="brand-lockup"><img class="brand-mark" src="/static/dubsync-icon.svg?v=20261004" alt=""><strong>DubSync</strong><small>v0.2.0</small></div>
+    <nav class="main-nav" aria-label="Navegação principal">
+      <a class="nav-item nav-item-link nav-intro" href="/" title="Ir para a tela inicial de projetos"><svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 10.5 12 4l8 6.5V20a1 1 0 0 1-1 1h-5v-6h-4v6H5a1 1 0 0 1-1-1z"/><path d="M9 9.5h6"/></svg><span>Intro</span></a>
+      <a class="nav-item nav-item-link nav-capture" href="/projects/{{ project.project_id }}/capture"><svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7.5A2.5 2.5 0 0 1 6.5 5h11A2.5 2.5 0 0 1 20 7.5v9a2.5 2.5 0 0 1-2.5 2.5h-11A2.5 2.5 0 0 1 4 16.5z"/><circle cx="12" cy="12" r="3.2"/><path d="M8 5 9 3h6l1 2"/></svg><span>Captura</span></a>
+      <a class="nav-item nav-item-link nav-dubbing" href="/projects/{{ project.project_id }}/dubbing"><svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 10v4m4-8v12m4-15v18m4-13v8m4-11v14m4-10v6"/></svg><span>Dublagem</span></a>
+      <a class="nav-item nav-item-link nav-integration active" href="/projects/{{ project.project_id }}/integration" aria-current="page"><svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 3h6l1 3 3 1v6l-3 1-1 3H9l-1-3-3-1V7l3-1z"/><circle cx="12" cy="10" r="2.5"/><path d="M9 17v4h6v-4"/></svg><span>Integração</span></a>
+      <a class="nav-item nav-item-link nav-settings" href="/projects/{{ project.project_id }}/settings"><svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 8.5a3.5 3.5 0 1 0 0 7 3.5 3.5 0 0 0 0-7Z"/><path d="m19.4 13.5 1.1.9-1.4 2.4-1.4-.5a7.9 7.9 0 0 1-1.5.9l-.2 1.5h-2.8l-.3-1.5a7.9 7.9 0 0 1-1.5-.9l-1.4.5-1.4-2.4 1.1-.9a7.1 7.1 0 0 1 0-1.8l-1.1-.9 1.4-2.4 1.4.5a7.9 7.9 0 0 1 1.5-.9l.3-1.5h2.8l.2 1.5a7.9 7.9 0 0 1 1.5.9l1.4-.5 1.4 2.4-1.1.9a7.1 7.1 0 0 1 0 1.8Z" transform="translate(-1.4 -1.4) scale(1.12)"/></svg><span>Configurações</span></a>
     </nav>
-    <div class="topbar-state"><span class="state-pill"><i class="state-dot amber"></i><span id="runtimeHeaderState">Runtime pendente</span></span><a class="project-pill" href="/projects/{{ project.project_id }}/integration">◈ {{ project.game_title or project.name }} · {{ project.dub_language|upper }}</a></div>
+    <div class="appbar-right"><span class="integration-runtime-badge"><i class="state-dot amber"></i><span id="runtimeHeaderState">Runtime pendente</span></span><a class="header-project-back" href="/" title="Voltar ao Hub de Projetos">← Projetos</a><div class="header-project-pill" title="Projeto e idioma de dublagem ativos"><span class="header-project-icon" aria-hidden="true">◈</span><span>{{ project.name }}</span><small>{{ project.dub_language|upper }}</small></div></div>
   </header>
 
   <main class="integration-app">
     <div class="integration-switch" role="tablist" aria-label="Área de integração">
-      <button class="switch-tab active" type="button" data-subnav="games" aria-selected="true">▦ <span>Jogos</span></button>
-      <button class="switch-tab" type="button" data-subnav="plugins" aria-selected="false">▧ <span>Plugins</span><small>Catálogo</small></button>
+      <button class="switch-tab active" type="button" data-subnav="games" aria-selected="true" title="Abrir o perfil e as tarefas de integração do jogo">▦ <span>Jogos</span></button>
+      <button class="switch-tab" type="button" data-subnav="plugins" aria-selected="false" title="Consultar e vincular adaptadores de jogos">▧ <span>Plugins</span><small>Catálogo</small></button>
     </div>
 
     <section id="gamesPanel" class="subnav-panel">
       <div class="integration-workspace">
         <aside class="game-library panel">
           <div class="library-head"><div><span class="eyebrow">WORKSPACE</span><h1>Jogos</h1></div><button id="refreshWorkspace" class="icon-button" type="button" title="Atualizar integração">↻</button></div>
-          <label class="search-field"><span>⌕</span><input id="gameSearch" type="search" placeholder="Buscar jogos..." aria-label="Buscar jogos"></label>
+          <label class="search-field"><span>⌕</span><input id="gameSearch" type="search" placeholder="Buscar jogos..." aria-label="Buscar jogos" title="Filtra os jogos já cadastrados no DubSync"></label>
           <div id="gameList" class="game-list">
             {% for item in projects %}
             <a class="game-entry{% if item.project_id == project.project_id %} selected{% endif %}" href="/projects/{{ item.project_id }}/integration" data-search="{{ (item.game_title or item.name)|lower }}">
@@ -58,7 +59,8 @@
             </a>
             {% endfor %}
           </div>
-          <a class="add-game" href="/" title="Criar ou adicionar um jogo no hub">＋ <span>Adicionar jogo</span></a>
+          <p id="gameSearchEmpty" class="library-hint" hidden>Nenhum jogo corresponde à busca.</p>
+          <a class="add-game" href="/?create=1&amp;return=integration" title="Criar um jogo e abrir sua integração">＋ <span>Adicionar jogo</span></a>
           <p class="library-hint">A biblioteca usa os projetos já cadastrados no DubSync.</p>
         </aside>
 
@@ -70,17 +72,17 @@
             </div>
             <div class="active-plugin-box">
               <span class="puzzle-icon">✣</span>
-              <label>Plugin ativo<select id="activePluginSelect"><option value="">Nenhum plugin vinculado</option></select></label>
-              <button id="managePluginsButton" class="button outline" type="button">⚙ Gerenciar plugins</button>
+              <label title="Selecione o adaptador vinculado a este jogo; a opção Nenhum remove o vínculo">Plugin ativo<select id="activePluginSelect"><option value="">Nenhum plugin vinculado</option></select></label>
+              <button id="managePluginsButton" class="button outline" type="button" title="Abrir o catálogo para consultar e vincular plugins">⚙ Gerenciar plugins</button>
             </div>
           </header>
 
           <nav class="game-tabs" role="tablist" aria-label="Workspace do jogo">
-            <button class="game-tab active" type="button" data-game-tab="overview">⌂ <span>Visão geral</span></button>
-            <button class="game-tab" type="button" data-game-tab="config">⚙ <span>Configuração</span></button>
-            <button class="game-tab" type="button" data-game-tab="mapping">↗ <span>Mapeamento</span></button>
-            <button class="game-tab" type="button" data-game-tab="tests">▷ <span>Testes</span></button>
-            <button class="game-tab" type="button" data-game-tab="publication">⇧ <span>Publicação</span></button>
+            <button class="game-tab active" type="button" data-game-tab="overview" title="Ver o resumo e as pendências do jogo">⌂ <span>Visão geral</span></button>
+            <button class="game-tab" type="button" data-game-tab="config" title="Definir build, executável, idioma e áudio">⚙ <span>Configuração</span></button>
+            <button class="game-tab" type="button" data-game-tab="mapping" title="Tela de correlações manuais preservadas para exploração futura" hidden aria-hidden="true">↗ <span>Mapeamento</span></button>
+            <button class="game-tab" type="button" data-game-tab="tests" title="Abrir e acompanhar checklists de integração">▷ <span>Testes</span></button>
+            <button class="game-tab" type="button" data-game-tab="publication" title="Gerar e baixar o pacote runtime">⇧ <span>Publicação</span></button>
           </nav>
 
           <section class="game-page active" data-game-page="overview">
@@ -93,27 +95,27 @@
                   <div><span>Plugin ativo</span><b id="summaryPlugin">Nenhum</b></div>
                 </div>
                 <div class="summary-metrics">
-                  <div><span class="metric-icon green">✓</span><span><small>Integração</small><b id="summaryIntegration">Configuração pendente</b></span></div>
-                  <div><span class="metric-icon blue">☷</span><span><small>Mapeamento</small><b id="summaryMapping">— falas</b></span></div>
+                  <div><span class="metric-icon amber" id="summaryIntegrationIcon">·</span><span><small>Integração</small><b id="summaryIntegration">Configuração pendente</b></span></div>
+                  <div><span class="metric-icon blue">☷</span><span><small>Correspondência automática</small><b id="summaryMapping">— falas</b></span></div>
                   <div><span class="metric-icon violet">≋</span><span><small>Takes</small><b id="summaryTakes">— aprovados</b></span></div>
                 </div>
-                <button class="primary-gradient" type="button" data-open-tab="tests">▷ <span>Preparar teste de integração</span> <b>›</b></button>
+                <button class="primary-gradient" type="button" data-open-tab="tests" title="Abrir a aba de testes para acompanhar a prova real no jogo">▷ <span>Preparar teste de integração</span> <b>›</b></button>
               </article>
               <article class="panel status-card">
                 <header class="card-heading"><span class="card-icon pulse">⌁</span><h3>Status da integração</h3></header>
                 <div class="status-row"><i class="status-check pending" id="statusGame">·</i><span><b>Jogo configurado</b><small id="statusGameText">Caminho do executável pendente</small></span></div>
-                <div class="status-row"><i class="status-check pending" id="statusBridge">·</i><span><b>Bridge conectada</b><small>Aguardando o adaptador do jogo</small></span></div>
-                <div class="status-row"><i class="status-check pending" id="statusManifest">·</i><span><b>Manifesto mapeado</b><small id="statusManifestText">Nenhum gatilho real cadastrado</small></span></div>
+                <div class="status-row"><i class="status-check pending" id="statusBridge">·</i><span><b>Callback do jogo</b><small id="statusBridgeText">Aguardando uma fala real</small></span></div>
+                <div class="status-row"><i class="status-check pending" id="statusManifest">·</i><span><b>Falas prontas para reprodução</b><small id="statusManifestText">Aprove takes com texto para preparar a correspondência automática</small></span></div>
               </article>
               <article class="panel compatibility-card">
                 <header class="card-heading"><span class="card-icon layers">▱</span><h3>Compatibilidade</h3></header>
-                <div class="compat-item"><span>Tipo de trigger</span><b id="compatTrigger">articy_external_id</b></div>
+                <div class="compat-item"><span>Tipo de trigger</span><b id="compatTrigger">Articy ExternalId / Object ID</b></div>
                 <div class="compat-item"><span>Áudio runtime</span><b id="compatAudio">OGG Vorbis · mono · 24 kHz</b></div>
                 <div class="compat-item"><span>Fallback</span><b>Visual Runtime · planejado</b></div>
-                <p class="honesty-note">A análise do REPLACED ainda é hipótese até validar um gatilho em execução.</p>
+                <p class="honesty-note">O plugin procura uma correspondência exata pelo texto do diálogo e reproduz o take aprovado no FMOD do jogo. Se o texto for ambíguo, ele é ignorado; correlações manuais já salvas continuam como alternativa.</p>
               </article>
             </div>
-            <article class="panel gate-card"><span class="gate-icon">🎮</span><div><b>Próximo gate</b><strong>Validar 10 dublagens reais no jogo</strong><p id="gateSummary">Configure a build, associe gatilhos observados e gere um pacote com takes aprovados.</p></div><button class="button violet-button" type="button" data-open-tab="tests">Abrir checklist de testes <span>›</span></button></article>
+            <article class="panel gate-card"><span class="gate-icon">🎮</span><div><b>Próximo gate</b><strong>Validar 10 dublagens reais no jogo</strong><p id="gateSummary">Aprove takes com texto reconhecível e gere o pacote para ativação automática na pasta do jogo.</p></div><button class="button violet-button" type="button" data-open-tab="tests" title="Ir aos checklists da prova de dez falas no jogo">Abrir checklist de testes <span>›</span></button></article>
           </section>
 
           <section class="game-page" data-game-page="config" hidden>
@@ -121,27 +123,36 @@
               <header class="card-heading"><span class="card-icon blue">⚙</span><div><h3>Configuração do perfil</h3><p>Build, executável, idioma e formato do áudio derivado.</p></div></header>
               <form id="profileForm" class="integration-form">
                 <div class="form-grid">
-                  <label>Engine<input name="engine" maxlength="80" placeholder="Unity IL2CPP"></label>
-                  <label>Build do jogo<input name="build_version" maxlength="80" placeholder="Versão Steam / build ID"></label>
-                  <label>Plataforma<input name="platform" maxlength="80" placeholder="Windows · Steam"></label>
-                  <label>Idioma do runtime<input name="language" maxlength="16" value="{{ project.dub_language }}" required></label>
-                  <label class="wide">Caminho do executável<input name="executable_path" maxlength="1000" placeholder="I:\SteamLibrary\steamapps\common\REPLACED\Replaced.exe"></label>
-                  <label class="wide">Pasta do jogo<input name="install_root" maxlength="1000" placeholder="Pasta de instalação"></label>
-                  <label>Formato do pacote<select name="audio_format"><option value="ogg">OGG Vorbis</option><option value="wav">WAV · smoke test</option></select></label>
-                  <label>Taxa OGG<input name="bitrate_kbps" type="number" min="32" max="192" value="64"></label>
+                  <label title="Tecnologia do jogo. Selecione uma sugestão ou digite outra engine.">Engine<input name="engine" list="engineSuggestions" maxlength="80" placeholder="Unity IL2CPP" title="Engine usada pelo jogo; REPLACED usa Unity IL2CPP"></label>
+                  <datalist id="engineSuggestions"><option value="Unity IL2CPP"><option value="Unity Mono"><option value="Unreal Engine 5"><option value="Unreal Engine 4"><option value="Godot 4"><option value="GameMaker"><option value="Custom"></datalist>
+                  <label title="Versão ou identificador da build instalada; atualize quando o jogo for atualizado">Build do jogo<input name="build_version" maxlength="80" placeholder="Versão Steam / build ID" title="Identifique exatamente a versão do jogo usada pelo adaptador"></label>
+                  <label title="Sistema e loja em que esta instalação do jogo está disponível">Plataforma<input name="platform" list="platformSuggestions" maxlength="80" placeholder="Windows · Steam" title="Selecione uma sugestão ou digite outra plataforma"></label>
+                  <datalist id="platformSuggestions"><option value="Windows · Steam"><option value="Windows · GOG"><option value="Windows · Epic Games"><option value="Windows · Microsoft Store"><option value="Linux · Steam"><option value="Linux · GOG"></datalist>
+                  <label title="Idioma dos takes que o runtime vai procurar no pacote">Idioma do runtime<input name="language" list="languageSuggestions" maxlength="16" value="{{ project.dub_language }}" required title="Use um código como pt-BR, en-US ou es-ES"></label>
+                  <datalist id="languageSuggestions"><option value="pt-BR"><option value="en-US"><option value="es-ES"><option value="fr-FR"><option value="de-DE"><option value="ja-JP"></datalist>
+                  <div class="path-field wide"><label for="gameExecutablePath" title="Arquivo .exe da instalação local do jogo">Caminho do executável</label><div class="path-input"><input id="gameExecutablePath" name="executable_path" maxlength="1000" placeholder="I:\SteamLibrary\steamapps\common\REPLACED\Replaced.exe" title="Caminho local do .exe; use Localizar arquivo para preencher"><button class="button outline" type="button" data-pick-path="executable" data-target="gameExecutablePath" title="Abrir o explorador para selecionar o executável .exe do jogo">Localizar arquivo…</button></div></div>
+                  <div class="path-field wide"><label for="gameInstallRoot" title="Diretório raiz da instalação do jogo">Pasta do jogo</label><div class="path-input"><input id="gameInstallRoot" name="install_root" maxlength="1000" placeholder="Pasta de instalação" title="Pasta local onde o jogo está instalado; use Localizar pasta"><button class="button outline" type="button" data-pick-path="directory" data-target="gameInstallRoot" title="Abrir o explorador para selecionar a pasta de instalação">Localizar pasta…</button></div></div>
+                  <label title="Formato dos arquivos derivados do pacote; os masters WAV continuam intactos">Formato do pacote<select name="audio_format" title="OGG para uso normal; WAV para prova rápida"><option value="ogg">OGG Vorbis</option><option value="wav">WAV · smoke test</option></select></label>
+                  <label title="Taxa de compressão dos arquivos OGG em kilobits por segundo">Taxa OGG<input name="bitrate_kbps" type="number" list="bitrateSuggestions" min="32" max="192" step="1" value="64" title="Escolha uma sugestão ou informe uma taxa entre 32 e 192 kbps"></label>
+                  <datalist id="bitrateSuggestions"><option value="48"><option value="64"><option value="96"><option value="128"><option value="160"><option value="192"></datalist>
+                  <label class="wide volume-control" title="Ajusta somente as falas reproduzidas pelo DubSync no jogo. O volume mestre do jogo continua afetando todos os sons.">
+                    <span class="volume-control-heading"><span>Volume das falas do DubSync</span><output id="dubSyncVolumeValue" for="dubSyncVolume">100%</output></span>
+                    <input id="dubSyncVolume" name="volume_percent" type="range" min="0" max="200" step="5" value="100" aria-describedby="dubSyncVolumeNote">
+                    <small id="dubSyncVolumeNote">100% mantém o nível original; 0% silencia as falas dubladas. Acima de 100% pode haver distorção. Não precisa gerar os áudios novamente.</small>
+                  </label>
                 </div>
                 <p class="form-note">A conversão cria derivados em runtime; o MASTER WAV aprovado da Fase 2 não é alterado.</p>
-                <div class="form-actions"><span id="profileSaveMessage" role="status"></span><button class="button primary" type="submit">Salvar configuração</button></div>
+                <div class="form-actions"><span id="profileSaveMessage" role="status"></span><button class="button primary" type="submit" title="Salvar o perfil do jogo com os valores informados">Salvar configuração</button></div>
               </form>
             </article>
           </section>
 
-          <section class="game-page" data-game-page="mapping" hidden>
+          <section class="game-page" data-game-page="mapping" hidden aria-hidden="true">
             <article class="panel mapping-panel">
               <header class="card-heading"><span class="card-icon blue">↗</span><div><h3>Mapeamento das falas</h3><p>Associe cada ocorrência a um ID observado no jogo/plugin. Timestamp de vídeo não é gatilho.</p></div><span id="mappingTotals" class="count-chip">Carregando...</span></header>
-              <div class="mapping-toolbar"><label class="search-field compact"><span>⌕</span><input id="mappingSearch" type="search" placeholder="Buscar texto, personagem ou gatilho"></label><label class="check-filter"><input id="onlyApproved" type="checkbox"> Só takes aprovados</label></div>
+              <div class="mapping-toolbar"><label class="search-field compact"><span>⌕</span><input id="mappingSearch" type="search" placeholder="Buscar texto, personagem ou gatilho" title="Filtra as falas carregadas por texto, personagem ou ID"></label><label class="check-filter" title="Exibir somente falas com um take aprovado"><input id="onlyApproved" type="checkbox"> Só takes aprovados</label></div>
               <div class="mapping-table-wrap"><table class="mapping-table"><thead><tr><th>Fala / personagem</th><th>Take aprovado</th><th>Trigger real</th><th></th></tr></thead><tbody id="mappingBody"><tr><td colspan="4" class="empty-row">Carregando ocorrências...</td></tr></tbody></table></div>
-              <footer class="mapping-footer"><span id="mappingPageInfo"></span><button id="loadMoreMappings" class="button quiet" type="button">Carregar mais</button></footer>
+              <footer class="mapping-footer"><span id="mappingPageInfo"></span><button id="loadMoreMappings" class="button quiet" type="button" title="Buscar a próxima página de falas do banco">Carregar mais</button></footer>
             </article>
           </section>
 
@@ -150,20 +161,20 @@
               <header class="card-heading"><span class="card-icon blue">▷</span><div><h3>Testes de integração</h3><p>O smoke test valida uma fala real; o gate de aceite exige pelo menos dez.</p></div></header>
               <div class="test-prerequisites">
                 <div><i id="testPluginState">○</i><span><b>Plugin vinculado</b><small>Escolha o adaptador adequado ao jogo.</small></span></div>
-                <div><i id="testPackageState">○</i><span><b>Pacote gerado</b><small>Inclui somente takes aprovados com trigger preenchido.</small></span></div>
-                <div><i id="testBridgeState">○</i><span><b>Jogo e bridge</b><small>O hook runtime do REPLACED ainda precisa ser confirmado.</small></span></div>
+                <div><i id="testPackageState">○</i><span><b>Pacote gerado</b><small>Inclui takes aprovados que o texto único identifica ou correlações guardadas.</small></span></div>
+                <div><i id="testBridgeState">○</i><span><b>Jogo e bridge</b><small id="testBridgeText">Aguardando evento real do jogo.</small></span></div>
               </div>
-              <div class="test-warning"><b>Estado atual:</b> o registro real de eventos ainda depende do adaptador executar dentro do jogo. Esta tela não simula sucesso.</div>
+              <div class="test-warning"><b>Estado atual:</b> o plugin usa FMOD do jogo e procura os takes pelo texto, sem preencher IDs por fala. O gate de 10 diálogos continua dependendo da reprodução confirmada em gameplay.</div>
               <div id="testRunsList" class="test-runs-list"><p class="empty-row">Nenhum teste registrado.</p></div>
             </article>
           </section>
 
           <section class="game-page" data-game-page="publication" hidden>
             <article class="panel publication-panel">
-              <header class="card-heading"><span class="card-icon blue">⇧</span><div><h3>Publicação do pacote runtime</h3><p>Gera manifesto, relatório de mapeamento e áudio derivado sem modificar os masters.</p></div></header>
+              <header class="card-heading"><span class="card-icon blue">⇧</span><div><h3>Sincronização com o jogo</h3><p>Ao aprovar ou rejeitar um take, o DubSync atualiza o pacote e o ativa na pasta do REPLACED. Use a ação manual para forçar uma atualização.</p></div></header>
               <div class="publication-summary"><div><span>Formato</span><b id="publicationFormat">OGG Vorbis</b></div><div><span>Falas elegíveis</span><b id="publicationEligible">0</b></div><div><span>Adaptador</span><b id="publicationAdapter">Pendente</b></div></div>
-              <label class="version-field">Versão do pacote<input id="packageVersion" value="0.1.0" maxlength="48"></label>
-              <div class="form-actions"><span id="packageMessage" role="status"></span><button id="buildPackageButton" class="button primary" type="button">Gerar pacote</button></div>
+              <label class="version-field" title="Identificador da versão do ZIP que será gerado">Versão do pacote<input id="packageVersion" value="0.1.0" maxlength="48" title="Exemplo: 0.1.0"></label>
+              <div class="form-actions"><span id="packageMessage" role="status"></span><button id="buildPackageButton" class="button primary" type="button" title="Gerar e ativar imediatamente o pacote com os takes aprovados">Sincronizar agora</button></div>
               <div id="packageResult" class="package-result" hidden></div>
               <div id="packageHistory" class="package-history"></div>
             </article>
@@ -174,11 +185,12 @@
 
     <section id="pluginsPanel" class="subnav-panel" hidden>
       <article class="panel plugin-catalog-panel">
-        <header class="catalog-heading"><div><span class="eyebrow">INFRAESTRUTURA</span><h1>Plugins</h1><p>Catálogo de adaptadores. O plugin ativo é salvo como configuração do perfil de jogo.</p></div><div class="catalog-controls"><label class="check-filter"><input id="showAllPlugins" type="checkbox"> Mostrar todos</label><button id="backToGames" class="button outline" type="button">← Voltar ao jogo</button></div></header>
+        <header class="catalog-heading"><div><span class="eyebrow">INFRAESTRUTURA</span><h1>Plugins</h1><p>Catálogo de adaptadores. O plugin ativo é salvo como configuração do perfil de jogo.</p></div><div class="catalog-controls"><label class="check-filter" title="Incluir plugins de outros jogos ou engines"><input id="showAllPlugins" type="checkbox"> Mostrar todos</label><button id="backToGames" class="button outline" type="button" title="Voltar ao perfil do jogo atual">← Voltar ao jogo</button></div></header>
         <div id="pluginCatalog" class="plugin-catalog"><p class="empty-row">Carregando catálogo...</p></div>
         <details class="manifest-register">
           <summary>＋ Registrar manifesto local</summary>
           <p>Registra metadados e capacidades do plugin. Não copia nem executa código.</p>
+          <div class="manifest-file-row"><button id="importPluginManifestButton" class="button outline" type="button" title="Carregar um manifesto JSON local para conferência antes do registro">Localizar arquivo JSON…</button><input id="pluginManifestFile" type="file" accept=".json,application/json" hidden><span id="pluginManifestFileName">Ou edite o JSON abaixo.</span></div>
           <textarea id="pluginManifestInput" spellcheck="false">{
   "plugin_id": "com.exemplo.meu-adaptador",
   "version": "0.1.0",
@@ -190,13 +202,13 @@
   "capabilities": ["dialogue_start", "external_audio"],
   "entrypoint": "plugin/entrypoint"
 }</textarea>
-          <div class="manifest-actions"><span id="pluginRegisterMessage" role="status"></span><button id="registerPluginButton" class="button outline" type="button">Validar e registrar</button></div>
+          <div class="manifest-actions"><span id="pluginRegisterMessage" role="status"></span><button id="registerPluginButton" class="button outline" type="button" title="Validar os metadados JSON e cadastrar o plugin; nenhum código é instalado">Validar e registrar</button></div>
         </details>
         <p class="catalog-note">Plugins locais ficam como não verificados até haver instalação declarativa, revisão e confirmação. Scripts arbitrários não são executados automaticamente.</p>
       </article>
     </section>
     <div id="integrationToast" class="toast" role="status" aria-live="polite"></div>
   </main>
-  <script src="/static/integration.js?v=20261007-1" defer></script>
+  <script src="/static/integration.js?v=20261008-1" defer></script>
 </body>
 </html>

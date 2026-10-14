@@ -6,7 +6,7 @@ let mode = "youtube", activeSessionId = "", selectedDesktopRect = null, currentS
 let regions = structuredClone(DEFAULT_REGIONS), preview = null, previewKind = "", previewMode = "capture", drag = null;
 let persistentFilePauseAvailable = false;
 let sessions = [], events = [], selectedEventId = "", selectedThumb = "crop", pollTimer = 0, livePreviewTimer = 0, sessionWatchTimer = 0, toastTimer = 0, pausePending = false;
-let overviewSessions = [], overviewSessionId = "", overviewVideoDuration = 0;
+let overviewSessions = [], overviewSectors = [], overviewSessionId = "", overviewVideoDuration = 0;
 let coverageUrl = "", coverageLoadedAt = 0, coverageCompleteSession = "", fileOrganizationForSession = "";
 let layoutDrag = null, timelineEdit = null, timelineNavigatorDrag = null, ignoreTimelineClick = false;
 let timelinePinSelectedIds = new Set(), timelinePinSelectionAnchor = "", timelineMarqueeDrag = null, timelinePinDrag = null;
@@ -17,6 +17,9 @@ let roiCharacterColorById = new Map(), roiCharacterColorByRoiName = new Map(), r
 let roiCharacterColorsLoadedAt = 0, roiCharacterColorsLoadPromise = null;
 let timelineRange = {start:0,span:60,end:60};
 const TIMELINE_VIEW_STORAGE_KEY="dubsync.timelineViews.v1";
+const CAPTURE_PLAYBACK_RATE_KEY="dubsync.capturePlaybackRate.v1";
+const CAPTURE_SUBTITLE_KEY="dubsync.captureSubtitleEnabled.v1";
+let captureSubtitleEnabled=localStorage.getItem(CAPTURE_SUBTITLE_KEY)!=="false";
 const SHORTCUTS_STORAGE_KEY="dubsync.shortcuts.v1";
 const SHORTCUT_STEPS_STORAGE_KEY="dubsync.shortcutSteps.v1";
 const BLOCK_AUTOMATION_STORAGE_KEY="dubsync.blockAutomation.v1";
@@ -36,7 +39,7 @@ const SHORTCUT_ACTIONS=[
   ["previousDialogue","Diálogo anterior","Seleciona o ponto de diálogo anterior; adaptação de navegação temporal J/K do After Effects.",{code:"KeyJ"}],
   ["nextDialogue","Próximo diálogo","Seleciona o próximo ponto de diálogo; adaptação de navegação temporal J/K do After Effects.",{code:"KeyK"}],
   ["manualDialogue","Adicionar diálogo manual","Abre o formulário para criar uma fala no tempo atual do player.",{code:"KeyN"}],
-  ["removeDialogue","Excluir diálogo selecionado","Executa a mesma ação do botão Excluir/Descartar, incluindo confirmação e exclusão definitiva configurada.",{code:"Delete"}],
+  ["removeDialogue","Excluir diálogo selecionado","Executa a ação do botão Excluir/Descartar; respeita as opções de confirmação e exclusão definitiva em Configurações.",{code:"Delete"}],
   ["zoomIn","Aumentar zoom da timeline","Aproxima a escala temporal; referência After Effects: +/=. ",{code:"Equal"}],
   ["zoomOut","Diminuir zoom da timeline","Afasta a escala temporal; referência After Effects: −.",{code:"Minus"}],
   ["fitTimeline","Ajustar timeline ao trecho","Mostra novamente toda a duração; referência After Effects: Shift+;.",{code:"Semicolon",shift:true}],
@@ -53,9 +56,9 @@ let observedActivityHistory = [];
 let lastTimelinePlaybackTime = null;
 let timelineVideoFrameId = 0, timelineAnimationFrameId = 0;
 let followDialogue = localStorage.getItem("dubsync.followDialogue") === "true";
-let showSplitPreview = true, permanentDiscardEnabled = false;
-function setPermanentDiscardEnabled(value){permanentDiscardEnabled=Boolean(value);const button=$("#discardButton");if(button){button.textContent=permanentDiscardEnabled?"Excluir definitivamente":"▤ Descartar";button.title=permanentDiscardEnabled?"Excluir este diálogo permanentemente; será solicitada confirmação.":"Descartar preserva o diálogo para revisão posterior.";}}
-window.setPermanentDiscardEnabled=setPermanentDiscardEnabled;void api("/api/settings").then((value)=>setPermanentDiscardEnabled(value.review?.permanent_discard)).catch(()=>{});
+let showSplitPreview = true, permanentDiscardEnabled = false, confirmDialogueRemoval = true;
+function setPermanentDiscardEnabled(value, confirmRemoval = true){permanentDiscardEnabled=Boolean(value);confirmDialogueRemoval=confirmRemoval!==false;const button=$("#discardButton");if(button){button.textContent=permanentDiscardEnabled?"Excluir definitivamente":"▤ Descartar";button.title=permanentDiscardEnabled?(confirmDialogueRemoval?"Excluir este diálogo permanentemente; será solicitada confirmação.":"Excluir este diálogo permanentemente sem confirmação; ação irreversível."):"Descartar preserva o diálogo para revisão posterior.";}}
+window.setPermanentDiscardEnabled=setPermanentDiscardEnabled;void api("/api/settings").then((value)=>setPermanentDiscardEnabled(value.review?.permanent_discard,value.review?.confirm_dialogue_removal)).catch(()=>{});
 let fineSweepRun = null, fineSweepSessionId = "", fineSweepPollTimer = 0;
 const layoutStorageKey = "dubsync.layout.v1";
 const EVENT_TABLE_LAYOUT_KEY = "dubsync.eventTableLayout.v1";
@@ -319,7 +322,25 @@ function initializeTimelineNavigator(){
   });
   if("ResizeObserver" in window){const observer=new ResizeObserver(()=>{const bounds=getTimelineBounds(),saved=timelineViews[bounds.sessionId]||{start:bounds.start,span:bounds.span};renderTimelineNavigator(bounds,clampTimelineView(Number(saved.start)||bounds.start,Number(saved.span)||bounds.span,bounds));});observer.observe(track);}
 }
+function renderCaptureSubtitle(sourceTime=videoClock()){
+  const overlay=$("#captureSubtitleOverlay");if(!overlay)return;
+  if(!captureSubtitleEnabled||!Number.isFinite(sourceTime)||$("#videoPlayer").classList.contains("hidden")){overlay.classList.add("hidden");overlay.textContent="";return;}
+  const sessionId=activeSessionId||currentSession?.session_id||"";
+  const item=events.filter((event)=>event.session_id===sessionId&&event.review_status!=="discarded"&&event.review_status!=="merged"&&Number(event.start_time)<=sourceTime+.04&&(event.end_time==null||Number(event.end_time)<=Number(event.start_time)||sourceTime<=Number(event.end_time)+.04))
+    .sort((a,b)=>Number(b.start_time)-Number(a.start_time))[0];
+  const text=String(item?.corrected_text||item?.processed_text||item?.original_text||"").trim();
+  overlay.textContent=text;
+  overlay.classList.toggle("hidden",!text);
+}
+function setCapturePlaybackRate(value,persist=true){
+  const player=$("#videoPlayer"),select=$("#capturePlaybackRate"),allowed=[1,1.5,2,3,5,10,15,20];
+  const rate=allowed.includes(Number(value))?Number(value):1;
+  if(select)select.value=String(rate);
+  if(player){player.defaultPlaybackRate=rate;player.playbackRate=rate;}
+  if(persist)try{localStorage.setItem(CAPTURE_PLAYBACK_RATE_KEY,String(rate));}catch{/* optional preference */}
+}
 function updateTimelinePlayback(sourceTime){
+  renderCaptureSubtitle(sourceTime);
   const cursor=$("#timelineCursor");if(!cursor)return;
   const position=Math.max(0,Math.min(100,(sourceTime-timelineRange.start)/Math.max(.001,timelineRange.span)*100));
   cursor.style.left=`${position}%`;
@@ -358,7 +379,7 @@ function stopTimelinePlaybackTracking(){
 }
 function updatePreviewToggle(){const player=$("#videoPlayer"),button=$("#previewToggle");if(!player||!button)return;const paused=player.paused;button.textContent=paused?"▶":"Ⅱ";button.setAttribute("aria-label",paused?"Reproduzir vídeo":"Pausar vídeo");button.title=paused?"Reproduzir vídeo":"Pausar vídeo";button.disabled=player.classList.contains("hidden");}
 function togglePreviewPlayback(){const player=$("#videoPlayer"),bounds=videoSourceBounds();if(player.classList.contains("hidden"))return;if(player.paused){if(player.currentTime>=bounds.end-.03||player.currentTime<bounds.start)player.currentTime=bounds.start;player.play().catch(()=>toast("Não foi possível reproduzir este vídeo no Chromium.",true));}else player.pause();}
-function updatePlayerDisplay(){const player=$("#videoPlayer"),slider=$("#seekSlider");updatePreviewToggle();if(!player||!Number.isFinite(player.duration))return;const bounds=videoSourceBounds();if(player.currentTime<bounds.start-.05){player.currentTime=bounds.start;return;}if(player.currentTime>=bounds.end-.03){if(!player.paused)player.pause();if(Math.abs(player.currentTime-bounds.end)>.001)player.currentTime=bounds.end;}slider.disabled=false;slider.min=String(bounds.start);slider.max=String(bounds.end);slider.value=String(Math.max(bounds.start,Math.min(bounds.end,player.currentTime||bounds.start)));$("#previewTime").textContent=timecode(player.currentTime||bounds.start)+" / "+timecode(bounds.end);updateTimelinePlayback(player.currentTime||bounds.start);updateVideoOverviewCursor();if(preview&&regions.some((item)=>item.motion?.enabled||item.lifetime?.enabled))drawPreview();}function loadSessionPlayer(session){const config=session?.config_json||{},path=config.downloaded_path||config.path;if(!session||!path){const player=$("#videoPlayer");player.pause();player.removeAttribute("src");player.load();player.classList.add("hidden");$("#seekSlider").disabled=true;updatePreviewToggle();return;}const player=$("#videoPlayer"),key=`${session.session_id}|${path}`;player.classList.remove("hidden");player.muted=true;player.dataset.pendingStart=String(Number(session.source_start??config.start??0));if(player.dataset.key!==key){player.dataset.key=key;delete player.dataset.seekInitialized;player.src=`/api/sessions/${encodeURIComponent(session.session_id)}/video?project_id=${encodeURIComponent(window.DUBSYNC_PROJECT_ID||"")}`;player.load();}if(player.readyState>=1){const wanted=Number(player.dataset.pendingStart)||0;if(Math.abs(player.currentTime-wanted)>.5&&player.dataset.seekInitialized!==key){player.currentTime=Math.min(wanted,Math.max(0,player.duration||wanted));player.dataset.seekInitialized=key;}updatePlayerDisplay();}}
+function updatePlayerDisplay(){const player=$("#videoPlayer"),slider=$("#seekSlider");updatePreviewToggle();if(!player||!Number.isFinite(player.duration))return;const bounds=videoSourceBounds();if(player.currentTime<bounds.start-.05){player.currentTime=bounds.start;return;}if(player.currentTime>=bounds.end-.03){if(!player.paused)player.pause();if(Math.abs(player.currentTime-bounds.end)>.001)player.currentTime=bounds.end;}slider.disabled=false;slider.min=String(bounds.start);slider.max=String(bounds.end);slider.value=String(Math.max(bounds.start,Math.min(bounds.end,player.currentTime||bounds.start)));$("#previewTime").textContent=timecode(player.currentTime||bounds.start)+" / "+timecode(bounds.end);updateTimelinePlayback(player.currentTime||bounds.start);updateVideoOverviewCursor();if(preview&&regions.some((item)=>item.motion?.enabled||item.lifetime?.enabled))drawPreview();}function loadSessionPlayer(session){const config=session?.config_json||{},path=config.downloaded_path||config.path;if(!session||!path){const player=$("#videoPlayer");player.pause();player.removeAttribute("src");player.load();player.classList.add("hidden");$("#seekSlider").disabled=true;updatePreviewToggle();renderCaptureSubtitle();return;}const player=$("#videoPlayer"),key=`${session.session_id}|${path}`;player.classList.remove("hidden");player.muted=true;setCapturePlaybackRate($("#capturePlaybackRate")?.value||1,false);player.dataset.pendingStart=String(Number(session.source_start??config.start??0));if(player.dataset.key!==key){player.dataset.key=key;delete player.dataset.seekInitialized;player.src=`/api/sessions/${encodeURIComponent(session.session_id)}/video?project_id=${encodeURIComponent(window.DUBSYNC_PROJECT_ID||"")}`;player.load();}if(player.readyState>=1){const wanted=Number(player.dataset.pendingStart)||0;if(Math.abs(player.currentTime-wanted)>.5&&player.dataset.seekInitialized!==key){player.currentTime=Math.min(wanted,Math.max(0,player.duration||wanted));player.dataset.seekInitialized=key;}updatePlayerDisplay();}}
 async function showSourceTimeInPlayer(sourceTime){
   const player=$("#videoPlayer");if(player.classList.contains("hidden"))return false;
   if(player.readyState<1||!Number.isFinite(player.duration)){
@@ -468,7 +489,7 @@ async function beginYoutube(){
 }
 function clearSessionPlayerForFilePreview(){const player=$("#videoPlayer");player.pause();player.removeAttribute("src");player.load();delete player.dataset.key;delete player.dataset.pendingStart;delete player.dataset.seekInitialized;player.classList.add("hidden");$("#seekSlider").disabled=true;updatePreviewToggle();}
 async function previewFile(){try{const path=$("#filePath").value.trim();if(!path)throw new Error("Informe o caminho do arquivo.");const query=new URLSearchParams({path,start:String(durationValue($("#sourceStart").value))}),image=await api(`/api/file-preview?${query}`),sessionPath=currentSession?.config_json?.downloaded_path||currentSession?.config_json?.path;if(!sessionPath||sessionPath.toLowerCase()!==path.toLowerCase())clearSessionPlayerForFilePreview();drawImage(image,"file");}catch(error){toast(error.message,true);}}
-async function chooseVideoFile(){if(activeState()){toast("Encerre a sessão ativa antes de trocar o arquivo de vídeo.",true);return;}const button=$("#openVideoFile");button.disabled=true;try{const result=await api("/api/video-library/select-file",{method:"POST",body:"{}"});if(result.cancelled)return;document.querySelector('.source-tab[data-mode="file"]').click();$("#filePath").value=result.path;$("#filePath").title=result.path;showDownloadedOrigin(null);await previewFile();toast(`Vídeo selecionado: ${result.path.split("\\").pop()}`);}catch(error){toast(error.message,true);}finally{button.disabled=false;}}
+async function chooseVideoFile(){if(activeState()){toast("Encerre a sessão ativa antes de trocar o arquivo de vídeo.",true);return;}const button=$("#openVideoFile");button.disabled=true;try{const result=await api("/api/video-library/select-file",{method:"POST",body:"{}"});if(result.cancelled)return;const savedPath=String(currentSession?.config_json?.downloaded_path||currentSession?.config_json?.path||"");if(currentSession?.state==="complete"&&savedPath&&savedPath.toLocaleLowerCase("pt-BR")!==result.path.toLocaleLowerCase("pt-BR")){document.querySelector('.source-tab[data-mode="file"]').click();$("#nextVideoPath").value=result.path;await planNextVideo();return;}document.querySelector('.source-tab[data-mode="file"]').click();$("#filePath").value=result.path;$("#filePath").title=result.path;showDownloadedOrigin(null);await previewFile();toast(`Vídeo selecionado: ${result.path.split("\\").pop()}`);}catch(error){toast(error.message,true);}finally{button.disabled=false;}}
 async function beginFile(){
   if(preparePending)return;
   preparePending=true;updatePlaybackButton();
@@ -495,10 +516,51 @@ function updateNextBlockControl(){
   const button=$("#nextSegmentButton"),field=$("#nextBlockMinutes");if(!button||!field)return;
   const config=currentSession?.config_json||{},path=config.downloaded_path||config.path;
   const total=Number(config.video_duration||$("#videoPlayer").duration),start=Number(currentSession?.source_start||0),duration=Number(config.duration||currentSession?.requested_duration||0),remaining=total-(start+duration);
-  const ready=currentSession?.state==="complete"&&Boolean(path)&&Number.isFinite(remaining)&&remaining>.001;
+  const nextVideo=overviewSectors.find((sector)=>sector.planned),sameVideo=Number.isFinite(remaining)&&remaining>.001;
+  const ready=currentSession?.state==="complete"&&Boolean(path)&&(sameVideo||Boolean(nextVideo));
   const desired=Math.max(1,Number(field.value)||20)*60,actual=ready?Math.min(desired,remaining):desired;
-  button.disabled=!ready||preparePending;button.textContent=ready?`Próximo bloco · ${timecode(actual)} ▶`:currentSession?.state==="complete"&&path?"Vídeo finalizado":"Próximo bloco ▶";
-  button.title=ready?`Começa em ${timecode(start+duration)} e analisa ${timecode(actual)}. Se restar menos tempo no vídeo, usa somente o restante.`:"Disponível quando a análise do arquivo atual terminar e ainda houver vídeo.";
+  button.disabled=!ready||preparePending;button.textContent=ready?(sameVideo?`Próximo bloco · ${timecode(actual)} ▶`:`Iniciar vídeo ${nextVideo.index} · bloco ${overviewIndex(currentSession)+1} ▶`):currentSession?.state==="complete"&&path?"Vídeo finalizado":"Próximo bloco ▶";
+  button.title=ready?(sameVideo?`Começa em ${timecode(start+duration)} e analisa ${timecode(actual)}. Se restar menos tempo no vídeo, usa somente o restante.`:`Inicia ${nextVideo.path} em 00:00 com blocos de ${timecode(nextVideo.block_duration_seconds)}.`):"Disponível quando a análise do arquivo atual terminar e ainda houver vídeo.";
+}
+function updateVideoSectorControls(){
+  const root=$("#videoSectorControls"),select=$("#videoSectorSelect"),summary=$("#nextVideoSummary");if(!root||!select)return;
+  const path=currentSession?.config_json?.downloaded_path||currentSession?.config_json?.path;
+  root.classList.toggle("hidden",!path);
+  select.replaceChildren();
+  const currentIndex=overviewSectors.find((sector)=>sector.index===Number(overviewSessions.find((item)=>item.session_id===currentSession?.session_id)?.sector_index))?.index||Number(currentSession?.config_json?.sector_index)||1;
+  for(const sector of overviewSectors){
+    const filename=String(sector.path||"").split(/[\\/]/).pop();
+    const option=new Option(`Vídeo ${sector.index} · ${filename}${sector.planned?" · planejado":""}`,String(sector.index));
+    option.disabled=sector.planned;select.add(option);
+  }
+  if(!select.options.length&&path)select.add(new Option(`Vídeo ${currentIndex} · ${String(path).split(/[\\/]/).pop()}`,String(currentIndex)));
+  select.value=String(currentIndex);
+  const planned=overviewSectors.find((sector)=>sector.planned);
+  const lastCapturedIndex=Math.max(currentIndex,...overviewSectors.filter((sector)=>!sector.planned).map((sector)=>Number(sector.index)||1));
+  const canExtend=currentIndex===lastCapturedIndex;
+  for(const id of ["#nextVideoPath","#nextVideoBlockMinutes","#chooseNextVideo","#planNextVideo"])$(id).disabled=!canExtend;
+  if(planned){$("#nextVideoPath").value=planned.path;$("#nextVideoBlockMinutes").value=String(planned.block_duration_seconds/60);summary.textContent=`Vídeo ${planned.index} planejado: ${timecode(planned.duration)} · blocos de ${timecode(planned.block_duration_seconds)}. O total do projeto já inclui este vídeo.`;}
+  else summary.textContent=canExtend?"Adicione outro arquivo para continuar a sequência após o fim deste vídeo.":`Este vídeo já continua no vídeo ${lastCapturedIndex}. Selecione-o acima para adicionar outro arquivo.`;
+}
+async function chooseNextVideoFile(){
+  const button=$("#chooseNextVideo");button.disabled=true;
+  try{const result=await api("/api/video-library/select-file",{method:"POST",body:"{}"});if(result.cancelled)return;$("#nextVideoPath").value=result.path;await planNextVideo();}
+  catch(error){toast(error.message,true);}finally{button.disabled=false;}
+}
+async function planNextVideo(){
+  if(!currentSession?.session_id)return toast("Abra um bloco deste projeto antes de adicionar outro vídeo.",true);
+  const path=$("#nextVideoPath").value.trim(),minutes=Number($("#nextVideoBlockMinutes").value);
+  if(!path)return toast("Selecione o arquivo do próximo vídeo.",true);
+  if(!Number.isFinite(minutes)||minutes<1||minutes>240)return toast("Use blocos entre 1 e 240 minutos.",true);
+  const button=$("#planNextVideo");button.disabled=true;
+  try{const result=await api("/api/file/plan-next-video",{method:"POST",body:JSON.stringify({session_id:currentSession.session_id,path,block_duration_seconds:minutes*60})});await loadVideoOverviewPlan(currentSession,true);toast(`Vídeo adicionado à sequência. Ele começará no bloco ${result.first_block_index}.`);}
+  catch(error){toast(error.message,true);}finally{button.disabled=false;}
+}
+async function selectVideoSector(){
+  const sector=overviewSectors.find((item)=>item.index===Number($("#videoSectorSelect").value));if(!sector?.first_session_id||sector.first_session_id===currentSession?.session_id)return;
+  if(activeState()){toast("Aguarde o bloco atual terminar antes de abrir outro vídeo.",true);updateVideoSectorControls();return;}
+  try{const session=await api(`/api/sessions/${encodeURIComponent(sector.first_session_id)}`);await attachActiveSession(session);await showSourceTimeInPlayer(Number(session.source_start)||0);toast(`Vídeo ${sector.index} aberto.`);}
+  catch(error){toast(error.message,true);updateVideoSectorControls();}
 }
 function overviewIndex(session){const config=session?.config_json||{};return Math.max(1,Number(config.block_index||(config.previous_session_id?2:1)));}
 function overviewChain(){
@@ -512,15 +574,15 @@ function overviewChain(){
   return chain;
 }
 async function loadVideoOverviewPlan(session=currentSession,force=false){
-  const id=session?.session_id;if(!id){overviewSessionId="";overviewSessions=[];overviewVideoDuration=0;renderVideoOverview();return false;}
-  if(!force&&overviewSessionId===id)return true;const cachedSessions=overviewSessions;overviewSessionId=id;overviewSessions=[];overviewVideoDuration=Number(session.config_json?.video_duration)||0;renderVideoOverview();
-  try{const result=await api(`/api/sessions/${encodeURIComponent(id)}/video-plan`);if(overviewSessionId!==id)return false;overviewSessions=result.sessions||[];overviewVideoDuration=Number(result.video_duration)||overviewVideoDuration;}
-  catch(error){if(overviewSessionId===id){overviewSessions=cachedSessions.length?cachedSessions:[session];console.warn("Não foi possível carregar o plano completo do vídeo:",error);renderVideoOverview();}return false;}
-  renderVideoOverview();return true;
+  const id=session?.session_id;if(!id){overviewSessionId="";overviewSessions=[];overviewSectors=[];overviewVideoDuration=0;renderVideoOverview();updateVideoSectorControls();return false;}
+  if(!force&&overviewSessionId===id)return true;const cachedSessions=overviewSessions,cachedSectors=overviewSectors;overviewSessionId=id;overviewSessions=[];overviewSectors=[];overviewVideoDuration=Number(session.config_json?.video_duration)||0;renderVideoOverview();
+  try{const result=await api(`/api/sessions/${encodeURIComponent(id)}/video-plan`);if(overviewSessionId!==id)return false;overviewSessions=result.sessions||[];overviewSectors=result.sectors||[];overviewVideoDuration=Number(result.video_duration)||overviewVideoDuration;}
+  catch(error){if(overviewSessionId===id){overviewSessions=cachedSessions.length?cachedSessions:[session];overviewSectors=cachedSectors;console.warn("Não foi possível carregar o plano completo do vídeo:",error);renderVideoOverview();}return false;}
+  renderVideoOverview();updateNextBlockControl();updateVideoSectorControls();if(!preparePending&&currentSession?.session_id===id&&currentSession.state==="complete"&&blockAutomationMode==="automatic")queueMicrotask(()=>void maybeAutoStartNextBlock());return true;
 }
 function updateVideoOverviewCursor(totalOverride){
-  const cursor=$("#overviewCursor"),player=$("#videoPlayer");if(!cursor)return;const total=Number(totalOverride)||Number(currentSession?.config_json?.video_duration)||overviewVideoDuration||Number(preview?.video_duration)||Number(player.duration)||0;
-  if(!(total>0)){cursor.hidden=true;return;}cursor.hidden=false;const sourceTime=!player.classList.contains("hidden")&&Number.isFinite(player.currentTime)?player.currentTime:Number(currentSession?.progress?.current_source_time??currentSession?.current_source_time??currentSession?.source_start??0);cursor.style.left=`${Math.max(0,Math.min(100,sourceTime/total*100))}%`;
+  const cursor=$("#overviewCursor"),player=$("#videoPlayer");if(!cursor)return;const total=Number(totalOverride)||overviewVideoDuration||Number(currentSession?.config_json?.video_duration)||Number(preview?.video_duration)||Number(player.duration)||0;
+  if(!(total>0)){cursor.hidden=true;return;}cursor.hidden=false;const sourceTime=!player.classList.contains("hidden")&&Number.isFinite(player.currentTime)?player.currentTime:Number(currentSession?.progress?.current_source_time??currentSession?.current_source_time??currentSession?.source_start??0);const sectorIndex=Number(overviewSessions.find((item)=>item.session_id===currentSession?.session_id)?.sector_index)||1;const offset=Number(overviewSectors.find((item)=>item.index===sectorIndex)?.offset)||0;cursor.style.left=`${Math.max(0,Math.min(100,(offset+sourceTime)/total*100))}%`;
 }
 async function openVideoOverviewBlock(sessionId,sourceTime){
   if(!sessionId){seekVideoTo(sourceTime);return;}if(activeState()&&sessionId!==activeSessionId)return toast("Aguarde o bloco atual terminar antes de abrir outro.",true);
@@ -529,7 +591,7 @@ async function openVideoOverviewBlock(sessionId,sourceTime){
 }
 function updatePreviousBlockButton(){
   const button=$("#previousBlockButton");if(!button)return;const previousId=currentSession?.config_json?.previous_session_id,index=overviewIndex(currentSession);button.disabled=!previousId||activeState(currentSession?.state)||preparePending;
-  const previous=overviewSessions.find((item)=>item.session_id===previousId),previousStart=Number(previous?.source_start??0),previousEnd=previousStart+Number(previous?.config_json?.duration??previous?.requested_duration??0);button.title=previousId?`Abrir o bloco ${Math.max(1,index-1)}${previous?` · ${timecode(previousStart)}–${timecode(previousEnd)}`:""}.`:"Este é o primeiro bloco do vídeo.";
+  const previous=overviewSessions.find((item)=>item.session_id===previousId),previousStart=Number(previous?.source_start??0),previousEnd=previousStart+Number(previous?.config_json?.duration??previous?.requested_duration??0);button.title=previousId?`Abrir o bloco ${Math.max(1,index-1)}${previous?` · ${timecode(previousStart)}–${timecode(previousEnd)}`:""}.`:"Este é o primeiro bloco do projeto.";
 }
 async function goToPreviousBlock(){
   if(!currentSession?.config_json?.previous_session_id||activeState(currentSession.state)||preparePending)return;const previousId=currentSession.config_json.previous_session_id;
@@ -539,13 +601,20 @@ async function goToPreviousBlock(){
 function renderVideoOverview(){
   const blocksNode=$("#overviewBlocks"),ruler=$("#overviewRuler"),track=$("#overviewTrack");if(!blocksNode||!ruler||!track)return;
   const chain=overviewChain(),player=$("#videoPlayer"),inputRange=(()=>{try{return getInitialRange();}catch{return{start:0,end:0,duration:0};}})();
-  const total=Number(currentSession?.config_json?.video_duration)||Number(overviewVideoDuration)||Number(chain.map((item)=>item.config_json?.video_duration).find((value)=>Number(value)>0))||Number(preview?.video_duration)||Number(player.duration)||0;
   const root=chain[0],rootStart=Number(root?.source_start??inputRange.start)||0,rootDuration=Number(root?.config_json?.duration??root?.requested_duration??inputRange.duration)||0;
-  const step=Number([...chain].reverse().map((item)=>item.config_json?.block_duration_requested).find((value)=>Number(value)>0))||Math.max(60,Number($("#nextBlockMinutes")?.value||20)*60);
-  const plan=[];let lastEnd=rootStart;
-  for(const session of chain){const config=session.config_json||{},start=Number(session.source_start??config.start??0),duration=Number(config.duration??session.requested_duration??0),end=Math.min(total||Infinity,start+duration);if(duration>0&&end>start){plan.push({index:overviewIndex(session),start,end,session});lastEnd=Math.max(lastEnd,end);}}
-  if(!plan.length&&rootDuration>0){const end=Math.min(total||Infinity,rootStart+rootDuration);if(end>rootStart){plan.push({index:1,start:rootStart,end,session:null});lastEnd=end;}}
-  if(total>0&&plan.length){let cursor=lastEnd,index=Math.max(...plan.map((item)=>item.index))+1;for(let count=0;cursor<total-.01&&count<5000;count++,index++){const end=Math.min(total,cursor+step);plan.push({index,start:cursor,end,session:null});cursor=end;}}
+  const fallbackDuration=Number(currentSession?.config_json?.video_duration)||Number(preview?.video_duration)||Number(player.duration)||0;
+  const sectors=overviewSectors.length?overviewSectors:[{index:1,duration:fallbackDuration,offset:0,path:root?.config_json?.path||"",block_duration_seconds:0,planned:false}];
+  const total=sectors.reduce((sum,sector)=>sum+Number(sector.duration||0),0)||Number(overviewVideoDuration)||fallbackDuration;
+  const plan=[];let nextIndex=1;
+  for(const sector of sectors){
+    const offset=Number(sector.offset)||0,endOfSector=offset+Number(sector.duration||0);
+    const captured=chain.filter((item)=>Number(item.sector_index||item.config_json?.sector_index||1)===Number(sector.index));
+    let cursor=offset+(Number(sector.index)===1?rootStart:0);
+    for(const session of captured){const config=session.config_json||{},start=offset+Number(session.source_start??config.start??0),duration=Number(config.duration??session.requested_duration??0),end=Math.min(endOfSector||Infinity,start+duration);if(duration>0&&end>start){const index=overviewIndex(session);plan.push({index,start,end,session,sector});cursor=Math.max(cursor,end);nextIndex=Math.max(nextIndex,index+1);}}
+    if(!captured.length&&Number(sector.index)===1&&rootDuration>0){const end=Math.min(endOfSector||Infinity,cursor+rootDuration);if(end>cursor){plan.push({index:nextIndex++,start:cursor,end,session:null,sector});cursor=end;}}
+    const step=Number(sector.block_duration_seconds)||Number([...captured].reverse().map((item)=>item.config_json?.block_duration_requested).find((value)=>Number(value)>0))||Math.max(60,Number($("#nextBlockMinutes")?.value||20)*60);
+    for(let count=0;endOfSector>0&&cursor<endOfSector-.01&&count<5000;count++){const end=Math.min(endOfSector,cursor+step);plan.push({index:nextIndex++,start:cursor,end,session:null,sector});cursor=end;}
+  }
   const actualTotal=total||Math.max(inputRange.end,plan.at(-1)?.end||0);ruler.replaceChildren();blocksNode.replaceChildren();
   for(let i=0;i<=4;i++){const tick=document.createElement("span");tick.textContent=timecode(actualTotal*i/4);ruler.append(tick);}
   let complete=0,activeFraction=0;
@@ -553,13 +622,14 @@ function renderVideoOverview(){
     if(state!=="complete"&&activeState(state)){const progress=session.progress||{},now=Number(progress.current_source_time??session.current_source_time??item.start);fraction=Math.max(0,Math.min(1,(now-item.start)/Math.max(.001,item.end-item.start)));activeFraction+=fraction;}
     if(state==="complete")complete++;
     block.type="button";block.className=`overview-block ${state==="complete"?"complete":activeState(state)?"active":["failed","stopped"].includes(state)?"failed":"pending"}`;block.style.left=`${Math.max(0,item.start/actualTotal*100)}%`;block.style.width=`${Math.max(.12,(item.end-item.start)/actualTotal*100)}%`;fill.className="overview-block-fill";fill.style.width=`${fraction*100}%`;block.append(fill);
-    const label=state==="complete"?"Concluído":activeState(state)?(state==="paused"?"Pausado":"Em processamento"):["failed","stopped"].includes(state)?"Interrompido":"Aguardando";block.title=`Bloco ${item.index} · ${timecode(item.start)}–${timecode(item.end)} · ${label}${activeState(state)?` · ${Math.round(fraction*100)}%`:""}`;block.setAttribute("aria-label",block.title);block.disabled=!session; if(session)block.addEventListener("click",()=>openVideoOverviewBlock(session.session_id,item.start));blocksNode.append(block);
+    const label=state==="complete"?"Concluído":activeState(state)?(state==="paused"?"Pausado":"Em processamento"):["failed","stopped"].includes(state)?"Interrompido":"Aguardando";const offset=Number(item.sector?.offset)||0;block.title=`Vídeo ${item.sector?.index||1} · Bloco ${item.index} · ${timecode(item.start-offset)}–${timecode(item.end-offset)} · ${label}${activeState(state)?` · ${Math.round(fraction*100)}%`:""}`;block.setAttribute("aria-label",block.title);block.disabled=!session; if(session)block.addEventListener("click",()=>openVideoOverviewBlock(session.session_id,Number(session.source_start)||0));blocksNode.append(block);
   }
+  for(const sector of sectors.slice(1)){const divider=document.createElement("span");divider.className="overview-sector-divider";divider.style.left=`${Math.max(0,Number(sector.offset)/actualTotal*100)}%`;divider.title=`Início do vídeo ${sector.index}: ${String(sector.path||"").split(/[\\/]/).pop()}`;blocksNode.append(divider);}
   const denominator=plan.length,percent=denominator?Math.min(100,(complete+activeFraction)/denominator*100):0;
   $("#overviewProgressLabel").textContent=denominator?`${percent.toFixed(1)}% · ${complete}/${denominator} blocos concluídos`:"—";
   const current=chain.find((item)=>item.session_id===currentSession?.session_id)||currentSession;
-  if(current){const index=overviewIndex(current),item=plan.find((part)=>part.session?.session_id===current.session_id),state=current.state,progress=current.progress||{},fraction=state==="complete"?1:item?Math.max(0,Math.min(1,(Number(progress.current_source_time??current.current_source_time??item.start)-item.start)/Math.max(.001,item.end-item.start))):0;$("#overviewCurrentLabel").textContent=`Bloco ${index} · ${timecode(current.source_start)}–${timecode(Number(current.source_start)+Number(current.config_json?.duration??current.requested_duration??0))}${state==="complete"?" · concluído":activeState(state)?` · ${Math.round(fraction*100)}%`:state==="failed"?" · falhou":""}`;}
-  else if(plan.length)$("#overviewCurrentLabel").textContent=`Planejamento · ${timecode(rootStart)}–${timecode(plan[0].end)} · ${denominator} blocos no vídeo`;
+  if(current){const index=overviewIndex(current),item=plan.find((part)=>part.session?.session_id===current.session_id),state=current.state,progress=current.progress||{},fraction=state==="complete"?1:item?Math.max(0,Math.min(1,(Number(progress.current_source_time??current.current_source_time??current.source_start)-(Number(current.source_start)||0))/Math.max(.001,item.end-item.start))):0;$("#overviewCurrentLabel").textContent=`Vídeo ${item?.sector?.index||current.config_json?.sector_index||1} · Bloco ${index}/${plan.length} · ${timecode(current.source_start)}–${timecode(Number(current.source_start)+Number(current.config_json?.duration??current.requested_duration??0))}${state==="complete"?" · concluído":activeState(state)?` · ${Math.round(fraction*100)}%`:state==="failed"?" · falhou":""}`;}
+  else if(plan.length)$("#overviewCurrentLabel").textContent=`Planejamento · ${timecode(rootStart)}–${timecode(plan[0].end)} · ${denominator} blocos no projeto`;
   else $("#overviewCurrentLabel").textContent="Abra a prévia para detectar a duração completa do vídeo";
   updatePreviousBlockButton();updateVideoOverviewCursor(actualTotal);
 }
@@ -576,13 +646,18 @@ async function beginNextBlock({automatic=false}={}){
     const existing=overviewSessions.filter((item)=>item.config_json?.previous_session_id===previousSessionId).sort((a,b)=>String(b.created_at||"").localeCompare(String(a.created_at||"")))[0];
     if(existing){const next=await api(`/api/sessions/${encodeURIComponent(existing.session_id)}`);await attachActiveSession(next);await showSourceTimeInPlayer(Number(next.source_start)||0);toast(`Bloco ${overviewIndex(next)} reaberto.`);transitioned=true;return true;}
     if(!planUpdated)throw new Error("Não foi possível verificar se esse próximo bloco já existe. Verifique a conexão e tente novamente.");
-    const result=await api("/api/file/next-block",{method:"POST",body:JSON.stringify({previous_session_id:previousSessionId,duration_seconds:minutes*60})});
+    const config=currentSession?.config_json||{},end=Number(currentSession?.source_start||0)+Number(config.duration??currentSession?.requested_duration??0);
+    const nextVideo=overviewSectors.find((sector)=>sector.planned),changingVideo=end>=Number(config.video_duration||0)-.001&&Boolean(nextVideo);
+    const result=changingVideo
+      ?await api("/api/file/next-video",{method:"POST",body:JSON.stringify({previous_session_id:previousSessionId})})
+      :await api("/api/file/next-block",{method:"POST",body:JSON.stringify({previous_session_id:previousSessionId,duration_seconds:minutes*60})});
+    if(changingVideo)$("#nextBlockMinutes").value=String(nextVideo.block_duration_seconds/60);
     clearInterval(pollTimer);activeSessionId=result.session_id;currentSession=null;$("#sourceStart").value=timecode(result.start);$("#sourceDuration").value=timecode(result.start+result.duration);
     updateInitialRangeUi({source_start:result.start,config_json:{block_index:result.block_index||2,duration:result.duration,previous_session_id:previousSessionId}});
     await refreshSessions();await refreshSession();
     const playerMoved=await showSourceTimeInPlayer(result.start);
     await refreshEvents(true);pollTimer=setInterval(refreshSession,1400);
-    const message=result.duration<minutes*60?`Próximo trecho limitado aos ${timecode(result.duration)} restantes no vídeo.`:`Próximo bloco iniciado em ${timecode(result.start)}.`;
+    const message=changingVideo?`Vídeo ${nextVideo.index} iniciado no bloco ${result.block_index}.`:result.duration<minutes*60?`Próximo trecho limitado aos ${timecode(result.duration)} restantes no vídeo.`:`Próximo bloco iniciado em ${timecode(result.start)}.`;
     toast(playerMoved?`${message} Player posicionado em ${timecode(result.start)}.`:`${message} O player ainda está carregando o trecho.`);
     transitioned=true;return true;
   }catch(error){if(automatic&&autoNextStartedForSession===previousSessionId){autoNextStartedForSession="";localStorage.removeItem(AUTO_NEXT_PARENT_STORAGE_KEY);}toast(automatic?`O avanço automático falhou: ${error.message}`:error.message,true);return false;}
@@ -593,7 +668,8 @@ async function maybeAutoStartNextBlock(){
   if(blockAutomationMode!=="automatic"||preparePending||session?.state!=="complete"||!session.session_id)return;
   const videoPath=config.downloaded_path||config.path;if(!videoPath||autoNextStartedForSession===session.session_id)return;
   const total=Number(config.video_duration||$("#videoPlayer").duration),start=Number(session.source_start||0),duration=Number(config.duration??session.requested_duration??0);
-  if(!Number.isFinite(total)||total<=0||total-(start+duration)<=.001)return;
+  if(!Number.isFinite(total)||total<=0)return;
+  if(total-(start+duration)<=.001&&!overviewSectors.some((sector)=>sector.planned))return;
   autoNextStartedForSession=session.session_id;localStorage.setItem(AUTO_NEXT_PARENT_STORAGE_KEY,session.session_id);
   await beginNextBlock({automatic:true});
 }
@@ -823,12 +899,15 @@ function renderTimeline(){
   $("#timelineZoomIn").disabled=span<=.251;$("#timelineZoomOut").disabled=span>=bounds.span-.001;$("#timelineZoomFit").disabled=span>=bounds.span-.001;
   for(let i=0;i<6;i++){const mark=document.createElement("span");mark.textContent=timecode(start+span*i/5);ticks.append(mark);}
   const flagged=fineSweepSessionId===sessionId?fineSweepEventIds():new Set();
-  for(const item of events){if((item.end_time??item.start_time)<start||item.start_time>end)continue;const block=document.createElement("button");block.type="button";block.className=`timeline-event ${item.confidence<.68&&item.review_status==="pending"?"low-confidence":item.review_status}${flagged.has(item.event_id)?" fine-sweep-divergence":""}${item.event_id===selectedEventId?" selected":""}`;const left=Math.max(0,(item.start_time-start)/span*100),right=Math.min(100,Math.max(left+.5,((item.end_time??item.start_time+.1)-start)/span*100));block.style.left=`${left}%`;block.style.width=`${Math.max(.8,right-left)}%`;block.title=`#${item.sequence} · ${item.corrected_text||item.processed_text||item.original_text} · ${timecode(item.start_time)}–${timecode(item.end_time)}\nArraste as bordas para ajustar os tempos.`;
+  const visibleEvents=events.filter((item)=>(item.end_time??item.start_time)>=start&&item.start_time<=end).sort((a,b)=>a.start_time-b.start_time||a.sequence-b.sequence);
+  const laneEnds=[];const timelineLanes=new Map();
+  for(const item of visibleEvents){let lane=laneEnds.findIndex((laneEnd)=>laneEnd<=item.start_time);if(lane<0)lane=laneEnds.length;laneEnds[lane]=Math.max(item.start_time+.1,item.end_time??item.start_time);timelineLanes.set(item.event_id,lane);}
+  for(const item of visibleEvents){const lane=timelineLanes.get(item.event_id)||0,isDuplicate=item.segment_id==="duplicate";const block=document.createElement("button");block.type="button";block.className=`timeline-event ${item.confidence<.68&&item.review_status==="pending"?"low-confidence":item.review_status}${isDuplicate?" duplicate":""}${flagged.has(item.event_id)?" fine-sweep-divergence":""}${item.event_id===selectedEventId?" selected":""}`;const left=Math.max(0,(item.start_time-start)/span*100),right=Math.min(100,Math.max(left+.5,((item.end_time??item.start_time+.1)-start)/span*100));block.style.left=`${left}%`;block.style.width=`${Math.max(.8,right-left)}%`;block.style.setProperty("--timeline-event-top",`${8+lane*10}px`);block.style.zIndex=String(3+lane);block.title=`${isDuplicate?"Duplicado · ":""}#${item.sequence} · ${item.corrected_text||item.processed_text||item.original_text} · ${timecode(item.start_time)}–${timecode(item.end_time)}\nArraste as bordas para ajustar os tempos.`;
     if(item.end_time!=null){const leftHandle=document.createElement("i"),rightHandle=document.createElement("i");leftHandle.className="timeline-handle start";rightHandle.className="timeline-handle end";block.append(leftHandle,rightHandle);}
     block.addEventListener("pointerdown",(event)=>{if(event.button!==0||item.end_time==null)return;const rect=block.getBoundingClientRect(),edge=event.target.closest(".timeline-handle")?.classList.contains("start")?"start":event.target.closest(".timeline-handle")?.classList.contains("end")?"end":event.clientX-rect.left<7?"start":rect.right-event.clientX<7?"end":"move";timelineEdit={event:item,node:block,edge,startX:event.clientX,originalStart:Number(item.start_time),originalEnd:Number(item.end_time),nextStart:Number(item.start_time),nextEnd:Number(item.end_time),width:track.getBoundingClientRect().width,moved:false};block.setPointerCapture(event.pointerId);});
     block.addEventListener("pointermove",(event)=>{if(!timelineEdit||timelineEdit.node!==block)return;const delta=(event.clientX-timelineEdit.startX)/Math.max(1,timelineEdit.width)*timelineRange.span;if(Math.abs(delta)<.025)return;timelineEdit.moved=true;const min=timelineRange.start,max=timelineRange.end,duration=timelineEdit.originalEnd-timelineEdit.originalStart;if(timelineEdit.edge==="start")timelineEdit.nextStart=Math.max(min,Math.min(timelineEdit.originalEnd-.05,timelineEdit.originalStart+delta));else if(timelineEdit.edge==="end")timelineEdit.nextEnd=Math.min(max,Math.max(timelineEdit.originalStart+.05,timelineEdit.originalEnd+delta));else{const shift=Math.max(min-timelineEdit.originalStart,Math.min(max-timelineEdit.originalEnd,delta));timelineEdit.nextStart=timelineEdit.originalStart+shift;timelineEdit.nextEnd=timelineEdit.originalEnd+shift;}const l=(timelineEdit.nextStart-timelineRange.start)/timelineRange.span*100,r=(timelineEdit.nextEnd-timelineRange.start)/timelineRange.span*100;block.style.left=`${Math.max(0,l)}%`;block.style.width=`${Math.max(.8,Math.min(100,r)-Math.max(0,l))}%`;});
     block.addEventListener("pointerup",async(event)=>{if(!timelineEdit||timelineEdit.node!==block)return;const edit=timelineEdit;timelineEdit=null;if(!edit.moved)return;event.preventDefault();event.stopPropagation();ignoreTimelineClick=true;setTimeout(()=>ignoreTimelineClick=false,0);try{await api(`/api/events/${item.event_id}/review/update`,{method:"POST",body:JSON.stringify({start_time:Number(edit.nextStart.toFixed(3)),end_time:Number(edit.nextEnd.toFixed(3))})});item.start_time=edit.nextStart;item.end_time=edit.nextEnd;selectedEventId=item.event_id;await refreshEvents(true);toast("Tempos ajustados na timeline.");}catch(error){toast(error.message,true);renderTimeline();}});
-    block.dataset.eventId=item.event_id;block.addEventListener("pointercancel",()=>{timelineEdit=null;renderTimeline();});block.addEventListener("click",(event)=>{event.stopPropagation();if(ignoreTimelineClick)return;selectEvent(item.event_id,false,true);});block.addEventListener("dblclick",(event)=>{event.stopPropagation();seekVideoTo(item.start_time);});track.append(block);const point=document.createElement("button");point.type="button";point.className=`timeline-dialogue-point ${item.confidence<.68&&item.review_status==="pending"?"low-confidence":item.review_status}${flagged.has(item.event_id)?" fine-sweep-divergence":""}${item.event_id===selectedEventId?" selected":""}`;point.dataset.eventId=item.event_id;point.innerHTML=captureTimelinePinSvg();point.style.left=`${left}%`;const speakerColor=characterColorForEvent(item);if(speakerColor){point.dataset.characterColor=speakerColor;point.style.setProperty("--character-color",speakerColor);}const dialogueText=(item.corrected_text||item.processed_text||item.original_text||"Texto não reconhecido").trim();point.title=`Diálogo #${item.sequence} · ${timecode(item.start_time,true)}\n${dialogueText}\nClique para selecionar; duplo clique para ir ao início.`;point.dataset.tooltip=point.title;block.dataset.tooltip=`Diálogo #${item.sequence} · ${timecode(item.start_time,true)}–${timecode(item.end_time,true)}\n${dialogueText}\nClique para selecionar; duplo clique para ir ao início.`;point.setAttribute("aria-label",`Diálogo #${item.sequence}: ${dialogueText}, em ${timecode(item.start_time)}`);point.addEventListener("click",(event)=>{event.stopPropagation();selectEvent(item.event_id,false,true);});point.addEventListener("dblclick",(event)=>{event.stopPropagation();seekVideoTo(item.start_time);});track.append(point);}
+    block.dataset.eventId=item.event_id;block.addEventListener("pointercancel",()=>{timelineEdit=null;renderTimeline();});block.addEventListener("click",(event)=>{event.stopPropagation();if(ignoreTimelineClick)return;selectEvent(item.event_id,false,true);});block.addEventListener("dblclick",(event)=>{event.stopPropagation();seekVideoTo(item.start_time);});track.append(block);const point=document.createElement("button");point.type="button";point.className=`timeline-dialogue-point ${item.confidence<.68&&item.review_status==="pending"?"low-confidence":item.review_status}${isDuplicate?" duplicate":""}${flagged.has(item.event_id)?" fine-sweep-divergence":""}${item.event_id===selectedEventId?" selected":""}`;point.dataset.eventId=item.event_id;point.innerHTML=captureTimelinePinSvg();point.style.left=`${left}%`;point.style.setProperty("--timeline-point-top",`${lane*10}px`);point.style.zIndex=String(5+lane);const speakerColor=characterColorForEvent(item);if(speakerColor){point.dataset.characterColor=speakerColor;point.style.setProperty("--character-color",speakerColor);}const dialogueText=(item.corrected_text||item.processed_text||item.original_text||"Texto não reconhecido").trim();point.title=`${isDuplicate?"Diálogo duplicado · ":"Diálogo "}#${item.sequence} · ${timecode(item.start_time,true)}\n${dialogueText}\nClique para selecionar; duplo clique para ir ao início.`;point.dataset.tooltip=point.title;block.dataset.tooltip=`${isDuplicate?"Diálogo duplicado · ":"Diálogo "}#${item.sequence} · ${timecode(item.start_time,true)}–${timecode(item.end_time,true)}\n${dialogueText}\nClique para selecionar; duplo clique para ir ao início.`;point.setAttribute("aria-label",`${isDuplicate?"Diálogo duplicado ":"Diálogo "}#${item.sequence}: ${dialogueText}, em ${timecode(item.start_time)}`);point.addEventListener("click",(event)=>{event.stopPropagation();selectEvent(item.event_id,false,true);});point.addEventListener("dblclick",(event)=>{event.stopPropagation();seekVideoTo(item.start_time);});track.append(point);}
   if(fineSweepSessionId===sessionId)for(const finding of fineSweepRun?.findings_json||[]){if(finding.kind!=="missing_dialogue"||finding.source_time<start||finding.source_time>end)continue;const marker=document.createElement("button");marker.type="button";marker.className="timeline-missing-point";marker.style.left=`${(finding.source_time-start)/span*100}%`;marker.textContent="!";marker.title=`Possível diálogo ausente · ${timecode(finding.source_time,true)}\n${finding.observed_text}`;marker.addEventListener("click",(event)=>{event.stopPropagation();seekVideoTo(finding.source_time);toast("Possível diálogo ausente. Use + Diálogo para cadastrá-lo após conferir o vídeo.");});track.append(marker);}
   for(const marker of timelineMarkers){if(marker.source_time<start||marker.source_time>end)continue;const pin=document.createElement("button");pin.type="button";pin.className="timeline-audio-marker";pin.style.left=`${(marker.source_time-start)/span*100}%`;pin.title=`${marker.label} · ${timecode(marker.source_time,true)} · clique para buscar; duplo clique para excluir`;pin.setAttribute("aria-label",`${marker.label} em ${timecode(marker.source_time,true)}`);pin.addEventListener("click",(event)=>{event.stopPropagation();if(marker.session_id===activeSessionId)seekVideoTo(marker.source_time);else{const session=sessions.find((item)=>item.session_id===marker.session_id);if(session)attachActiveSession(session).then(()=>seekVideoTo(marker.source_time));}});pin.addEventListener("dblclick",(event)=>{event.stopPropagation();deleteAudioStartMarker(marker);});track.append(pin);}
   const cursor=$("#timelineCursor"),time=Number.isFinite($("#videoPlayer").currentTime)?$("#videoPlayer").currentTime:selected?.start_time??bounds.start;cursor.style.left=`${Math.max(0,Math.min(100,(time-start)/span*100))}%`;applyCaptureTimelinePinSelection();
@@ -841,11 +920,47 @@ function setShortcutStep(name,value){const number=Number(value),limits={main:[.0
 function recordShortcut(event){if(!recordingShortcutAction)return false;if(event.code==="Escape"){event.preventDefault();recordingShortcutAction="";renderShortcutSettings();return true;}if(["ControlLeft","ControlRight","AltLeft","AltRight","ShiftLeft","ShiftRight","MetaLeft","MetaRight"].includes(event.code))return true;const binding={code:event.code,ctrl:event.ctrlKey,alt:event.altKey,shift:event.shiftKey,meta:event.metaKey};const conflict=Object.entries(shortcutBindings).find(([id,value])=>id!==recordingShortcutAction&&sameShortcut(value,binding));event.preventDefault();if(conflict){const label=SHORTCUT_ACTIONS.find(([id])=>id===conflict[0])?.[1]||"outro comando";recordingShortcutAction="";renderShortcutSettings();toast(`Essa combinação já está atribuída a “${label}”.`,true);return true;}shortcutBindings[recordingShortcutAction]=binding;recordingShortcutAction="";saveShortcutPreferences();renderShortcutSettings();toast("Atalho salvo neste navegador.");return true;}
 function editableKeyboardTarget(target){if(!(target instanceof Element))return false;const field=target.closest("input,textarea,select,[contenteditable='true'],[role='textbox']");if(!field)return false;if(field instanceof HTMLInputElement&&["checkbox","radio","button","submit","reset"].includes(field.type))return false;return true;}
 function videoClock(){const player=$("#videoPlayer");return !player.classList.contains("hidden")&&Number.isFinite(player.currentTime)?player.currentTime:Number(currentSession?.source_start)||0;}
+function captureTimelinePlayheadTime(){const position=Number.parseFloat($("#timelineCursor").style.left);if(Number.isFinite(position)&&timelineRange?.span>0)return timelineRange.start+timelineRange.span*Math.max(0,Math.min(100,position))/100;const player=$("#videoPlayer");if(!player.classList.contains("hidden")&&player.readyState>=1&&Number.isFinite(player.currentTime))return Number(player.currentTime);return videoClock();}
 function moveBySeconds(seconds){const player=$("#videoPlayer");if(player.classList.contains("hidden"))return;seekVideoTo(videoClock()+seconds);}
 function navigateDialogue(direction){const list=captureTimelinePinItems().filter((item)=>item.review_status!=="discarded");if(!list.length)return;const now=videoClock();const next=direction<0?[...list].reverse().find((item)=>item.start_time<now-.04)||list[0]:list.find((item)=>item.start_time>now+.04)||list[list.length-1];setCaptureTimelinePinSelection([next.event_id],next.event_id);selectEvent(next.event_id);}
-function openManualEventDialog(sessionId=activeSessionId,atTime=videoClock()){const session=sessions.find((item)=>item.session_id===sessionId)||(currentSession?.session_id===sessionId?currentSession:null);if(!session)return toast("Abra uma sessão para adicionar um diálogo.",true);const low=Number(session.source_start??session.config_json?.start)||0,high=low+Math.max(.1,Number(session.requested_duration??session.config_json?.duration)||0),start=Math.max(low,Math.min(high-.01,Number(atTime)||low));$("#manualEventText").value="";$("#manualEventStart").value=start.toFixed(3);$("#manualEventEnd").value=Math.min(high,start+2).toFixed(3);$("#manualEventStart").min=String(low);$("#manualEventStart").max=String(high-.001);$("#manualEventEnd").min=String(low+.001);$("#manualEventEnd").max=String(high);$("#manualEventCharacter").value="";$("#manualEventDialog").dataset.sessionId=session.session_id;$("#manualEventDialog").showModal();$("#manualEventText").focus();}
+function captureEditingSessionId(preferred=""){const selected=events.find((item)=>item.event_id===selectedEventId);return String(preferred||timelineIdentity()||selected?.session_id||currentSession?.session_id||"");}
+async function resolveCaptureEditingSession(sessionId){if(!sessionId)return null;let session=sessions.find((item)=>item.session_id===sessionId)||overviewSessions.find((item)=>item.session_id===sessionId)||(currentSession?.session_id===sessionId?currentSession:null);if(session)return session;try{const result=await api("/api/sessions");sessions=result.sessions||[];session=sessions.find((item)=>item.session_id===sessionId)||null;if(session)return session;}catch{}try{session=await api(`/api/sessions/${encodeURIComponent(sessionId)}`);if(session&&!sessions.some((item)=>item.session_id===session.session_id))sessions=[session,...sessions];return session;}catch{return null;}}
+async function openManualEventDialog(sessionId="",atTime=null){if(sessionId instanceof Event){sessionId="";atTime=null;}const requestedTime=atTime!=null&&Number.isFinite(Number(atTime))?Number(atTime):captureTimelinePlayheadTime();let targetId=captureEditingSessionId(sessionId),session=await resolveCaptureEditingSession(targetId);if(!session){await refreshSessions();targetId=captureEditingSessionId(sessionId);session=await resolveCaptureEditingSession(targetId);}if(!session)return toast(targetId?"Não consegui carregar o bloco selecionado para adicionar o diálogo. Selecione novamente o bloco na Captura e tente outra vez.":"Selecione ou reabra um bloco de captura antes de adicionar um diálogo.",true);const low=Number(session.source_start??session.config_json?.start)||0,high=low+Math.max(.1,Number(session.requested_duration??session.config_json?.duration)||0),start=Math.max(low,Math.min(high-.01,requestedTime));$("#manualEventText").value="";$("#manualEventStart").value=start.toFixed(3);$("#manualEventEnd").value=Math.min(high,start+2).toFixed(3);$("#manualEventStart").min=String(low);$("#manualEventStart").max=String(high-.001);$("#manualEventEnd").min=String(low+.001);$("#manualEventEnd").max=String(high);$("#manualEventCharacter").value="";const dialog=$("#manualEventDialog");dialog.dataset.sessionId=session.session_id;delete dialog.dataset.ocrObservation;$("#manualEventOcrStatus").textContent="O OCR vai usar as ROIs de legenda ativas no horário de início.";$("#manualEventOcr").disabled=false;dialog.showModal();$("#manualEventText").focus();}
 window.DubSyncCaptureOpenManualDialogue=openManualEventDialog;
-async function saveManualDialogue(){const dialog=$("#manualEventDialog"),text=$("#manualEventText").value.trim(),start=Number($("#manualEventStart").value),end=Number($("#manualEventEnd").value);if(!text)return toast("Digite o texto do diálogo.",true);if(!Number.isFinite(start)||!Number.isFinite(end)||end<=start)return toast("O fim precisa ser posterior ao início.",true);const button=$("#saveManualEvent");button.disabled=true;try{const created=await api("/api/events/manual",{method:"POST",body:JSON.stringify({session_id:dialog.dataset.sessionId,text,start_time:start,end_time:end,character:$("#manualEventCharacter").value.trim()||null})});dialog.close();await refreshEvents(true);selectedEventId=created.event_id;selectEvent(created.event_id,false);if(document.body.classList.contains("dubbing-active"))void window.DubSyncDubbing?.refreshTimelineData?.();toast("Diálogo manual criado na timeline.");}catch(error){toast(error.message,true);}finally{button.disabled=false;}}
+$("#manualEventStart").addEventListener("input",()=>{const dialog=$("#manualEventDialog");if(!dialog.dataset.ocrObservation)return;const text=dialog.dataset.ocrTextCandidate||"",character=dialog.dataset.ocrCharacterCandidate||"";if(text&&$("#manualEventText").value.trim()===text)$("#manualEventText").value="";if(character&&$("#manualEventCharacter").value.trim()===character)$("#manualEventCharacter").value="";delete dialog.dataset.ocrObservation;delete dialog.dataset.ocrTextCandidate;delete dialog.dataset.ocrCharacterCandidate;$("#manualEventOcrStatus").textContent="Horário alterado. Refazer o OCR para localizar a legenda e o personagem neste frame.";});
+async function runManualDialogueOcr(){
+  const dialog=$("#manualEventDialog"),button=$("#manualEventOcr"),status=$("#manualEventOcrStatus"),atTime=Number($("#manualEventStart").value),sessionId=dialog.dataset.sessionId;
+  if(!sessionId||!Number.isFinite(atTime))return toast("Informe um horário válido para refazer o OCR.",true);
+  const textField=$("#manualEventText"),characterField=$("#manualEventCharacter");
+  if(dialog.dataset.ocrTextCandidate&&textField.value.trim()===dialog.dataset.ocrTextCandidate)textField.value="";
+  if(dialog.dataset.ocrCharacterCandidate&&characterField.value.trim()===dialog.dataset.ocrCharacterCandidate)characterField.value="";
+  delete dialog.dataset.ocrTextCandidate;delete dialog.dataset.ocrCharacterCandidate;delete dialog.dataset.ocrObservation;
+  button.disabled=true;status.textContent="Lendo a legenda e a área de personagem configurada neste frame…";
+  try{
+    const result=await api(`/api/sessions/${encodeURIComponent(sessionId)}/ocr-at-time`,{method:"POST",body:JSON.stringify({at_time:atTime})});
+    const text=String(result.processed_text||result.raw_text||"").trim(),speaker=result.speaker||{},candidate=String(speaker.candidate||"").trim();
+    if(!text&&!candidate)throw new Error(speaker.configured?"O OCR não encontrou legenda nem personagem neste frame. Ajuste o horário e tente novamente.":"O OCR não encontrou legenda. A área do nome do personagem não está configurada nesta ROI.");
+    if(text){textField.value=text;dialog.dataset.ocrTextCandidate=text;}
+    if(candidate&&!characterField.value.trim()){characterField.value=candidate;dialog.dataset.ocrCharacterCandidate=candidate;}
+    dialog.dataset.ocrObservation=JSON.stringify(result);
+    const textInfo=text?`Legenda · ${result.region_name||"ROI de legenda"} · ${Math.round(Number(result.confidence||0)*100)}%`:"Legenda não reconhecida; digite o texto manualmente.";
+    const speakerInfo=candidate?`Personagem · ${candidate} · ${Math.round(Number(speaker.confidence||0)*100)}%${characterField.value.trim()!==candidate?" · mantive o que já estava no campo":""}`:speaker.configured?"Personagem não reconhecido; informe-o manualmente.":"Área do nome não configurada na ROI; informe o personagem manualmente.";
+    status.textContent=`${textInfo} · ${speakerInfo} · ${timecode(result.source_time,true)}. Confira antes de criar.`;
+  }catch(error){delete dialog.dataset.ocrObservation;status.textContent=error.message;toast(error.message,true);}
+  finally{button.disabled=false;}
+}
+async function saveManualDialogue(){
+  const dialog=$("#manualEventDialog"),text=$("#manualEventText").value.trim(),character=$("#manualEventCharacter").value.trim(),start=Number($("#manualEventStart").value),end=Number($("#manualEventEnd").value),sessionId=dialog.dataset.sessionId;
+  if(!text)return toast("Digite o texto ou use Refazer OCR.",true);
+  if(!character)return toast("Toda fala precisa ter um personagem. Use o OCR da área configurada ou informe o nome.",true);
+  if(!Number.isFinite(start)||!Number.isFinite(end)||end<=start)return toast("O fim precisa ser posterior ao início.",true);
+  const button=$("#saveManualEvent");button.disabled=true;
+  try{
+    let ocrObservation=null;try{ocrObservation=dialog.dataset.ocrObservation?JSON.parse(dialog.dataset.ocrObservation):null;}catch{}
+    const created=await api("/api/events/manual",{method:"POST",body:JSON.stringify({session_id:sessionId,text,start_time:start,end_time:end,character,ocr_observation:ocrObservation})});
+    dialog.close();if(![...$("#sessionFilter").options].some((option)=>option.value===sessionId))await refreshSessions();$("#sessionFilter").value=sessionId;$("#statusFilter").value="";if($("#characterFilter").value&&$("#characterFilter").value!==created.character)$("#characterFilter").value="";if($("#emotionFilter").value)$("#emotionFilter").value="";if(Number($("#minConfidence").value||0)>Number(created.confidence||0))$("#minConfidence").value="0";await refreshEvents(true);if(!events.some((item)=>item.event_id===created.event_id)){$("#characterFilter").value="";$("#emotionFilter").value="";$("#minConfidence").value="0";await refreshEvents(true);}selectedEventId=created.event_id;if(events.some((item)=>item.event_id===created.event_id)){selectEvent(created.event_id,false);if(document.body.classList.contains("dubbing-active"))void window.DubSyncDubbing?.refreshTimelineData?.();toast("Diálogo criado no bloco e no horário selecionados; ele foi selecionado na timeline.");}else toast("Diálogo salvo no banco, mas a lista não conseguiu carregá-lo. Atualize a sessão para exibi-lo.",true);
+  }catch(error){toast(error.message,true);}finally{button.disabled=false;}
+}
 async function duplicateSelectedDialogue(){
   const event=events.find((item)=>item.event_id===selectedEventId);if(!event)return toast("Selecione um diálogo para duplicar.",true);
   if(event.session_id!==activeSessionId)return toast("Abra o bloco do diálogo selecionado antes de duplicar.",true);
@@ -857,11 +972,32 @@ async function retrySelectedDialogueOcr(){
   const event=events.find((item)=>item.event_id===selectedEventId);if(!event)return toast("Selecione um diálogo para refazer o OCR.",true);
   const cursor=videoClock(),atTime=cursor>=event.start_time&&cursor<=(event.end_time??event.start_time)?cursor:event.start_time+((event.end_time??event.start_time)-event.start_time)/2;
   const button=$("#retryDialogueOcr");button.disabled=true;button.textContent="Lendo…";
-  try{const result=await api(`/api/events/${encodeURIComponent(event.event_id)}/retry-ocr`,{method:"POST",body:JSON.stringify({at_time:atTime})});await refreshEvents(true);if(!result.processed_text){toast("O OCR não encontrou texto neste frame. A leitura vazia ficou no histórico; tente outro ponto dentro do diálogo.",true);return;}const dialog=$("#ocrRetryDialog");dialog.dataset.eventId=event.event_id;$("#ocrRetryPrevious").value=event.corrected_text??event.processed_text??event.original_text??"";$("#ocrRetryCandidate").value=result.processed_text;$("#ocrRetryInfo").textContent=`Frame ${timecode(result.source_time,true)} · confiança ${Math.round(result.confidence*100)}%. Compare antes de aplicar.`;dialog.showModal();}
+  try{const result=await api(`/api/events/${encodeURIComponent(event.event_id)}/retry-ocr`,{method:"POST",body:JSON.stringify({at_time:atTime})});await refreshEvents(true);const speaker=result.speaker||{},candidate=String(speaker.candidate||"").trim();if(!result.processed_text&&!candidate){const reason=speaker.configured?"O OCR não encontrou texto do diálogo nem personagem neste frame. A tentativa ficou no histórico; tente outro ponto.":"O OCR não encontrou texto no diálogo. Para reler o personagem, configure a área na aba Personagem da ROI.";toast(reason,true);return;}const dialog=$("#ocrRetryDialog");dialog.dataset.eventId=event.event_id;$("#ocrRetryPrevious").value=event.corrected_text??event.processed_text??event.original_text??"";$("#ocrRetryCandidate").value=result.processed_text||"(Nenhum texto encontrado)";$("#ocrRetrySpeakerCandidate").value=candidate||(!speaker.configured?"Área de personagem não configurada para esta ROI.":speaker.text||"Nenhum nome reconhecido com confiança suficiente.");$("#ocrRetrySpeakerField").classList.toggle("hidden",!speaker.configured);$("#ocrRetryApplySpeakerRow").classList.toggle("hidden",!candidate);$("#ocrRetryApplySpeaker").checked=Boolean(candidate);const speakerInfo=candidate?` · personagem: ${candidate} (${Math.round(Number(speaker.confidence||0)*100)}%)`:speaker.configured?" · personagem não reconhecido":" · área de personagem não configurada";$("#ocrRetryInfo").textContent=`Frame ${timecode(result.source_time,true)} · texto ${Math.round(result.confidence*100)}%${speakerInfo}. Compare antes de aplicar.`;dialog.showModal();}
   catch(error){toast(error.message,true);}finally{button.textContent="◉ Refazer OCR";button.disabled=false;}
 }
-async function applyOcrRetry(){const dialog=$("#ocrRetryDialog"),id=dialog.dataset.eventId,text=$("#ocrRetryCandidate").value.trim();if(!id||!text)return;const button=$("#ocrRetryApply");button.disabled=true;try{await api(`/api/events/${encodeURIComponent(id)}/review/correct`,{method:"POST",body:JSON.stringify({corrected_text:text})});dialog.close();await refreshEvents(true);selectEvent(id,false);toast("Nova leitura aplicada como correção; OCR original preservado.");}catch(error){toast(error.message,true);}finally{button.disabled=false;}}
+async function applyOcrRetry(){const dialog=$("#ocrRetryDialog"),id=dialog.dataset.eventId,text=$("#ocrRetryCandidate").value.trim(),applySpeaker=$("#ocrRetryApplySpeaker").checked?$("#ocrRetrySpeakerCandidate").value.trim():"";if(!id||(!text||text.startsWith("(Nenhum texto"))&&!applySpeaker)return;const button=$("#ocrRetryApply");button.disabled=true;const changes={};if(text&&!text.startsWith("(Nenhum texto"))changes.corrected_text=text;if(applySpeaker)changes.character=applySpeaker;const action=changes.corrected_text?"correct":"update";try{await api(`/api/events/${encodeURIComponent(id)}/review/${action}`,{method:"POST",body:JSON.stringify(changes)});dialog.close();await refreshEvents(true);let filtersAdjusted=false;if(!events.some((item)=>item.event_id===id)){if(action==="correct"&&$("#statusFilter").value!=="corrected"){$("#statusFilter").value="corrected";filtersAdjusted=true;}if(changes.character&&$("#characterFilter").value){$("#characterFilter").value="";filtersAdjusted=true;}if(filtersAdjusted)await refreshEvents(true);}if(events.some((item)=>item.event_id===id))selectEvent(id,false);const message=changes.corrected_text&&changes.character?"Texto e personagem atualizados; OCR original preservado.":changes.corrected_text?"Nova leitura aplicada como correção; OCR original preservado.":"Personagem atualizado e vinculado à ROI.";toast(filtersAdjusted?`${message} A lista foi ajustada para manter o diálogo visível.`:message);}catch(error){toast(error.message,true);}finally{button.disabled=false;}}
 function captureTimelinePosition(){return{sessionId:timelineIdentity(),start:timelineRange.start,span:timelineRange.span,playhead:videoClock()};}
+function captureDubbingNavigationState(){const position=captureTimelinePosition(),selected=events.find((event)=>event.event_id===selectedEventId&&event.session_id===position.sessionId);return{sessionId:position.sessionId,playhead:position.playhead,timelineStart:position.start,timelineSpan:position.span,eventId:selected?.event_id||""};}
+window.DubSyncCaptureGetNavigationState=captureDubbingNavigationState;
+window.DubSyncCaptureApplyNavigationState=async(context)=>{
+  const sessionId=String(context?.sessionId||"");if(!sessionId)return false;
+  try{
+    let session=sessions.find((item)=>item.session_id===sessionId)||overviewSessions.find((item)=>item.session_id===sessionId);
+    if(!session){await refreshSessions();session=sessions.find((item)=>item.session_id===sessionId);}
+    if(!session)session=await api(`/api/sessions/${encodeURIComponent(sessionId)}`);
+    if(sessionId!==activeSessionId){if(activeState()){toast("Aguarde a captura atual terminar antes de abrir outro bloco.",true);return false;}await attachActiveSession(session);}
+    else if($("#sessionFilter").value!==sessionId){$("#sessionFilter").value=sessionId;await refreshEvents(true,true);}
+    const bounds=getTimelineBounds(sessionId);
+    if(Number.isFinite(Number(context.timelineStart))&&Number.isFinite(Number(context.timelineSpan))){const view=clampTimelineView(Number(context.timelineStart),Number(context.timelineSpan),bounds);saveTimelineView(sessionId,view.start,view.span);}
+    const candidates=events.filter((item)=>item.session_id===sessionId&&item.review_status!=="discarded"&&item.review_status!=="merged");
+    const playhead=Number(context.playhead);
+    const event=candidates.length&&Number.isFinite(playhead)?candidates.reduce((best,item)=>Math.abs(Number(item.start_time)-playhead)<Math.abs(Number(best.start_time)-playhead)?item:best):null;
+    if(event)selectEvent(event.event_id,false);
+    if(Number.isFinite(playhead))await showSourceTimeInPlayer(playhead);
+    renderTimeline();return true;
+  }catch(error){toast(`Não foi possível sincronizar o bloco da Captura: ${error.message}`,true);return false;}
+};
+document.addEventListener("click",(event)=>{const tab=event.target.closest?.('.nav-item[data-project-area]');if(!tab)return;if(tab.dataset.projectArea==="dubbing"&&!document.body.classList.contains("dubbing-active")){window.DubSyncDubbing?.prepareNavigation(captureDubbingNavigationState());}else if(tab.dataset.projectArea==="capture"&&document.body.classList.contains("dubbing-active")){const context=window.DubSyncDubbing?.getNavigationState?.();if(context)queueMicrotask(()=>void window.DubSyncCaptureApplyNavigationState(context));}},true);
 function restoreTimelinePosition(position){if(!position?.sessionId||!Number.isFinite(position.start)||!Number.isFinite(position.span))return;saveTimelineView(position.sessionId,position.start,position.span);}
 async function focusAfterRemoval(removedIds,preferredSessionId="",timelinePosition=captureTimelinePosition()){
   await refreshEvents(true,true,timelinePosition);
@@ -930,7 +1066,7 @@ function renderDetails(event){
     thumbs.append(button);
   }
 }function renderDialogueSummary(summary){
-  const total=Math.max(0,Number(summary.total)||0),green=Math.max(0,Number(summary.green)||0),pending=Math.max(0,Number(summary.pending)||0),low=Math.max(0,Number(summary.low_confidence)||0),discarded=Math.max(0,Number(summary.discarded)||0),active=green+pending+low,greenPercent=active?green/active*100:0;
+  const total=Math.max(0,Number(summary.total)||0),green=Math.max(0,Number(summary.green)||0),pending=Math.max(0,Number(summary.pending)||0),low=Math.max(0,Number(summary.low_confidence)||0),discarded=Math.max(0,Number(summary.discarded)||0),missingCharacter=Math.max(0,Number(summary.missing_character)||0),active=green+pending+low,greenPercent=active?green/active*100:0;
   $("#dialogueGreenPercent").textContent=Math.round(greenPercent)+"%";
   $("#dialogueGreenRatio").textContent=green+" / "+active;
   $("#dialogueGreenProgress").style.width=greenPercent+"%";
@@ -939,6 +1075,9 @@ function renderDetails(event){
   for(const [name,count] of states){const share=total?count/total*100:0;$("#dialogueStack"+({green:"Green",pending:"Pending",low:"Low",discarded:"Discarded"})[name]).style.width=share+"%";$("#dialogue"+({green:"Green",pending:"Pending",low:"Low",discarded:"Discarded"})[name]+"Breakdown").textContent=count+" · "+Math.round(share)+"%";}
   $("#dialogueStatusStacked").setAttribute("aria-label",total?("Total "+total+": "+green+" confirmados ou corrigidos, "+pending+" pendentes, "+low+" com baixa confiança e "+discarded+" descartados."):"Nenhum diálogo neste escopo.");
   $("#dialogueTotalLabel").textContent=total?"Total: "+total+" · "+active+" ativos para revisão · "+discarded+" descartados.":"Nenhum diálogo encontrado neste escopo.";
+  const characterCoverage=$("#dialogueCharacterCoverage"),missingPercent=active?Math.round(missingCharacter/active*100):0;
+  characterCoverage.classList.toggle("has-missing",missingCharacter>0);
+  characterCoverage.textContent=active?(missingCharacter?`⚠ Sem personagem: ${missingCharacter} de ${active} falas ativas (${missingPercent}%).`:`✓ Personagem atribuído em todas as ${active} falas ativas.`):"Nenhuma fala ativa para verificar personagem.";
   $("#dialogueStatusScope").textContent=$("#sessionFilter").value?"Sessão selecionada · independente dos filtros da lista":"Todas as sessões · independente dos filtros da lista";
 }
 async function refreshDialogueSummary(){
@@ -978,7 +1117,7 @@ async function refreshEvents(preservePlayback=false,preserveTimeline=false,timel
     const markerSessionId=viewToPreserve?.sessionId||$("#sessionFilter").value||events[0]?.session_id||activeSessionId;timelineMarkers=markerSessionId?(await api(`/api/sessions/${markerSessionId}/markers`)).markers:[];
     if(!events.some((item)=>item.event_id===selectedEventId)){const sameSession=viewToPreserve?.sessionId?events.find((item)=>item.session_id===viewToPreserve.sessionId):null;selectedEventId=sameSession?.event_id||events[0]?.event_id||"";}
     if(viewToPreserve)restoreTimelinePosition(viewToPreserve);
-    renderRows();renderTimeline();if(selectedEventId)selectEvent(selectedEventId,!preservePlayback,false,Boolean(viewToPreserve));else clearSelected();updateMergeToolbar();lastEventRefreshAt=Date.now();
+    renderRows();renderTimeline();renderCaptureSubtitle(videoClock());if(selectedEventId)selectEvent(selectedEventId,!preservePlayback,false,Boolean(viewToPreserve));else clearSelected();updateMergeToolbar();lastEventRefreshAt=Date.now();
   }catch(error){toast(error.message,true);}
 }
 window.DubSyncCaptureRefreshTimeline=()=>refreshEvents(true,true);
@@ -987,14 +1126,38 @@ async function refreshSessions(){try{const data=await api("/api/sessions"),selec
 function updateMergeToolbar(){const all=$$(".merge-check"),checked=$$(".merge-check:checked"),selectAll=$("#selectAllEvents");$("#mergeToolbar").classList.toggle("hidden",checked.length===0);$("#mergeCount").textContent=`${checked.length} selecionado(s)`;$("#bulkAcceptButton").disabled=checked.length===0;$("#mergeButton").disabled=checked.length<2||checked.length>12;$("#mergeButton").title=checked.length>12?"A união suporta até 12 eventos por vez.":"Unir os eventos selecionados.";$("#bulkRemoveButton").disabled=checked.length===0;if(selectAll){selectAll.disabled=all.length===0;selectAll.checked=all.length>0&&checked.length===all.length;selectAll.indeterminate=checked.length>0&&checked.length<all.length;}}
 async function mergeIds(ids){if(ids.length<2)return;try{await api("/api/events/merge",{method:"POST",body:JSON.stringify({event_ids:ids})});toast("Eventos unidos. Os registros anteriores foram preservados.");await refreshEvents();}catch(error){toast(error.message,true);}}
 async function mergeAdjacent(direction){const index=events.findIndex((event)=>event.event_id===selectedEventId),other=events[index+direction];if(!other)return;await mergeIds(direction<0?[other.event_id,selectedEventId]:[selectedEventId,other.event_id]);}
+async function discardSelectedCapturePins(items){
+  const selected=items||selectedCaptureTimelineItems();
+  const ids=selected.map((item)=>item.event_id);
+  if(!ids.length)return false;
+  const timelinePosition=captureTimelinePosition(),sessionId=selected[0].session_id;
+  const settings=await api("/api/settings"),permanent=Boolean(settings.review?.permanent_discard);
+  if(permanent&&settings.review?.confirm_dialogue_removal!==false){
+    const answer=confirm(`Excluir definitivamente ${ids.length} diálogo(s) selecionado(s)? O histórico será removido e os dados de dublagem sem compartilhamento serão apagados. Falas compartilhadas com outros diálogos serão preservadas. Esta ação não pode ser desfeita.`);
+    if(!answer)return false;
+  }
+  const endpoint=permanent?"/api/events/bulk-delete":"/api/events/bulk-discard";
+  const result=await api(endpoint,{method:"POST",body:JSON.stringify({event_ids:ids})});
+  timelinePinSelectedIds.clear();timelinePinSelectionAnchor="";
+  await focusAfterRemoval(ids,sessionId,timelinePosition);
+  if(permanent){
+    const restored=Number(result.restored_merged_sources)||0;
+    toast(`${result.deleted_events||ids.length} diálogo(s) excluído(s) definitivamente.${restored?` ${restored} parte(s) de diálogos unidos voltaram à lista.`:""}`);
+  }else toast(`${result.removed||ids.length} diálogo(s) descartado(s) e preservado(s) em Descartados.`);
+  return true;
+}
 async function discardSelectedEvent(){
+  const selectedPins=selectedCaptureTimelineItems();
+  if(selectedPins.length>1){try{await discardSelectedCapturePins(selectedPins);}catch(error){toast(error.message,true);}return;}
   const event=events.find((item)=>item.event_id===selectedEventId);if(!event)return;
   const timelinePosition=captureTimelinePosition();
   try{
     const settings=await api("/api/settings"),permanent=Boolean(settings.review?.permanent_discard);
     if(permanent){
+      if(settings.review?.confirm_dialogue_removal !== false){
       const answer=confirm("Excluir este diálogo definitivamente? O registro, o histórico de revisão e os dados de dublagem que não forem compartilhados serão apagados. Esta ação não pode ser desfeita.");
       if(!answer)return;
+      }
       const result=await api(`/api/events/${encodeURIComponent(event.event_id)}`,{method:"DELETE"});
       toast(result.restored_merged_sources?`Diálogo excluído; ${result.restored_merged_sources} parte(s) da união voltaram à lista.`:"Diálogo excluído definitivamente.");
     }else{
@@ -1241,6 +1404,9 @@ async function confirmSplit(){const dialog=$("#splitDialog"),event=events.find((
 async function health(){try{const result=await api("/api/health");persistentFilePauseAvailable=result.persistent_file_pause===true;updatePlaybackButton();const ready=Boolean(result.ffmpeg&&result.ffprobe&&result.node&&result.downloader);$("#health").textContent=ready?"yt-dlp · Node · FFmpeg · visual":!result.downloader?"yt-dlp ausente":!result.node?"Node.js ausente":"FFmpeg/ffprobe ausente";$("#health").classList.toggle("good",ready);}catch(error){$("#health").textContent=error.message;}}
 
 $("#blockAutomationMode").value=blockAutomationMode;$("#blockAutomationMode").addEventListener("change",(event)=>{blockAutomationMode=event.target.value==="automatic"?"automatic":"manual";localStorage.setItem(BLOCK_AUTOMATION_STORAGE_KEY,blockAutomationMode);if(blockAutomationMode==="automatic")void maybeAutoStartNextBlock();});$("#nextBlockMinutes").addEventListener("input",()=>{updateNextBlockControl();renderVideoOverview();});$("#sourceStart").addEventListener("input",()=>{updateInitialRangeSummary();renderVideoOverview();});$("#sourceDuration").addEventListener("input",()=>{updateInitialRangeSummary();renderVideoOverview();});
+$("#chooseNextVideo").addEventListener("click",()=>void chooseNextVideoFile());
+$("#planNextVideo").addEventListener("click",()=>void planNextVideo());
+$("#videoSectorSelect").addEventListener("change",()=>void selectVideoSector());
 $("#followDialogue").setAttribute("aria-pressed",String(followDialogue));$("#followDialogue").classList.toggle("active",followDialogue);$("#followDialogue").addEventListener("click",()=>{followDialogue=!followDialogue;localStorage.setItem("dubsync.followDialogue",String(followDialogue));$("#followDialogue").setAttribute("aria-pressed",String(followDialogue));$("#followDialogue").classList.toggle("active",followDialogue);$("#followDialogue").title=followDialogue?"Seleção automática ativa: seleciona quando o cursor cruza o ponto circular de início do diálogo. Clique para desativar.":"Ativar seleção automática ao cruzar o ponto circular de início do diálogo na timeline.";if(followDialogue)updateTimelinePlayback($("#videoPlayer").currentTime);});
 $$(".source-tab[data-mode]").forEach((tab)=>tab.addEventListener("click",()=>setMode(tab.dataset.mode)));
 $("#selectCaptureButton").addEventListener("click",()=>{if(!preview||!["desktop","youtube"].includes(previewKind))return toast("Clique em Play para abrir a prévia do vídeo.",true);if(selectedDesktopRect){selectedDesktopRect=null;previewMode="capture";$("#captureStatusBadge").textContent="SELECIONE O RECORTE";drawPreview();}$("#selectCaptureButton").classList.add("active");$("#addRoiButton").classList.remove("active");});
@@ -1252,7 +1418,7 @@ $("#settingsDialog").addEventListener("close",()=>{recordingShortcutAction="";})
 document.addEventListener("keydown",handleGlobalShortcut);
 $("#timelineScroll").addEventListener("wheel",(event)=>{if(!event.ctrlKey)return;event.preventDefault();const rect=$("#timelineTrack").getBoundingClientRect(),ratio=Math.max(0,Math.min(1,(event.clientX-rect.left)/Math.max(1,rect.width)));zoomTimeline(event.deltaY<0?.8:1.25,ratio);},{passive:false});
 $("#timelineZoomIn").addEventListener("click",()=>zoomTimeline(.8));$("#timelineZoomOut").addEventListener("click",()=>zoomTimeline(1.25));$("#timelineZoomFit").addEventListener("click",fitTimeline);
-$("#addManualDialogue").addEventListener("click",openManualEventDialog);$("#cancelManualEvent").addEventListener("click",()=>$("#manualEventDialog").close());$("#saveManualEvent").addEventListener("click",saveManualDialogue);
+$("#addManualDialogue").addEventListener("click",()=>void openManualEventDialog());$("#manualEventOcr").addEventListener("click",runManualDialogueOcr);$("#manualEventStart").addEventListener("input",()=>{const dialog=$("#manualEventDialog");if(dialog.dataset.ocrObservation){delete dialog.dataset.ocrObservation;$("#manualEventOcrStatus").textContent="O horário mudou. Refazer o OCR para ler o novo frame.";}});$("#cancelManualEvent").addEventListener("click",()=>$("#manualEventDialog").close());$("#saveManualEvent").addEventListener("click",saveManualDialogue);
 $("#duplicateDialogue").addEventListener("click",duplicateSelectedDialogue);$("#retryDialogueOcr").addEventListener("click",retrySelectedDialogueOcr);$("#ocrRetryKeep").addEventListener("click",()=>$("#ocrRetryDialog").close());$("#ocrRetryApply").addEventListener("click",applyOcrRetry);
 $("#blockCompleteNext").addEventListener("click",()=>{$("#blockCompleteDialog").close();beginNextBlock();});$("#blockCompleteSweep").addEventListener("click",startFineSweep);$("#blockCompleteLater").addEventListener("click",()=>$("#blockCompleteDialog").close());
 $("#fineSweepStartButton").addEventListener("click",startFineSweep);
@@ -1290,6 +1456,10 @@ window.openDubbingCharacterRoi = async (roiId, characterId) => {
   if(owner.session_id!==activeSessionId)await attachActiveSession(owner);
   return openCurrentRoi();
 };
+$$('.nav-item[data-project-area]').forEach((tab)=>tab.addEventListener('click',()=>{
+  if(tab.dataset.projectArea==='dubbing'){clearInterval(sessionWatchTimer);sessionWatchTimer=0;}
+  else if(tab.dataset.projectArea==='capture'&&!sessionWatchTimer){void syncActiveSession();sessionWatchTimer=setInterval(syncActiveSession,1100);}
+}));
 async function syncActiveSession(){
   if(!sessionHydrated||preparePending)return;
   try{
@@ -1311,4 +1481,9 @@ async function restoreActiveSession(){
   sessionHydrated=true;updatePlaybackButton();await refreshEvents();
   if(!sessionWatchTimer)sessionWatchTimer=setInterval(syncActiveSession,1100);
 }
+const savedCapturePlaybackRate=Number(localStorage.getItem(CAPTURE_PLAYBACK_RATE_KEY)||1);setCapturePlaybackRate(savedCapturePlaybackRate,false);
+$("#videoPlayer").addEventListener("loadedmetadata",()=>setCapturePlaybackRate($("#capturePlaybackRate").value,false));
+$("#capturePlaybackRate").addEventListener("change",(event)=>{setCapturePlaybackRate(event.currentTarget.value);toast(`Prévia em ${String(Number(event.currentTarget.value)).replace(".",",")}×. Tempos da timeline continuam no relógio original do vídeo.`);});
+$("#captureSubtitleToggle").setAttribute("aria-pressed",String(captureSubtitleEnabled));$("#captureSubtitleToggle").classList.toggle("active",captureSubtitleEnabled);$("#captureSubtitleToggle").title=captureSubtitleEnabled?"Ocultar a legenda OCR correspondente ao tempo atual do vídeo":"Mostrar a legenda OCR correspondente ao tempo atual do vídeo";
+$("#captureSubtitleToggle").addEventListener("click",(event)=>{captureSubtitleEnabled=!captureSubtitleEnabled;try{localStorage.setItem(CAPTURE_SUBTITLE_KEY,String(captureSubtitleEnabled));}catch{/* optional preference */}event.currentTarget.setAttribute("aria-pressed",String(captureSubtitleEnabled));event.currentTarget.classList.toggle("active",captureSubtitleEnabled);event.currentTarget.title=captureSubtitleEnabled?"Ocultar a legenda OCR correspondente ao tempo atual do vídeo":"Mostrar a legenda OCR correspondente ao tempo atual do vídeo";renderCaptureSubtitle();});
 initializeTimelineNavigator();initializeSplitters();updateRoiList();const captureLanguage=String(window.DUBSYNC_PROJECT?.capture_language||window.DUBSYNC_PROJECT?.source_language||"").split("-")[0].toLowerCase();if(captureLanguage&&[...$("#language").options].some(option=>option.value===captureLanguage))$("#language").value=captureLanguage;try{const source=JSON.parse(localStorage.getItem(`dubsync.projectSource.${window.DUBSYNC_PROJECT_ID}`)||"null");if(source?.mode){document.querySelector(`.source-tab[data-mode="${source.mode}"]`)?.click();if(source.mode==="youtube"){$("#youtubeUrl").value=source.value||"";if(source.value)loadCoverage(source.value,true);}if(source.mode==="file")$("#filePath").value=source.value||"";}}catch{}health();api("/api/settings").then((value)=>{showSplitPreview=value.review?.show_split_preview!==false;}).catch((error)=>console.warn("Não foi possível ler a preferência de prévia:",error));restoreActiveSession().catch((error)=>{sessionHydrated=true;updatePlaybackButton();toast("Não foi possível restaurar a sessão: "+error.message,true);});updatePipeline(null);if(window.DUBSYNC_INITIAL_AREA&&window.DUBSYNC_INITIAL_AREA!=="capture")window.addEventListener("load",()=>document.querySelector(`.nav-item[data-project-area="${window.DUBSYNC_INITIAL_AREA}"]`)?.click(),{once:true});

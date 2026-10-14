@@ -45,9 +45,11 @@
 #dubGrid .dock-collapsed>:not(.panel-title):not(.dub-panel-heading){display:none!important}
 #dubGrid .dock-collapsed .panel-title,#dubGrid .dock-collapsed .dub-panel-heading{height:31px;border-bottom:0}
 #dubGrid .dock-collapsed .dub-panel-heading>div:first-child{display:flex!important}
-#dubGrid .dock-collapsed .dock-header-actions>:not(.dock-collapse):not(.dock-float-toggle){display:none!important}
+#dubGrid .dock-collapsed .dock-header-actions>:not(.dock-collapse):not(.dock-float-toggle):not(.dock-lock-toggle){display:none!important}
 #dubGrid .dock-floating .panel-title,#dubGrid .dock-floating .dub-panel-heading{cursor:move}
 #dubGrid .dock-floating .panel-title button,#dubGrid .dock-floating .dub-panel-heading button{cursor:pointer}
+#dubGrid .dock-locked>.panel-title,#dubGrid .dock-locked>.dub-panel-heading,#dubGrid .dock-group>.dock-locked>.panel-title,#dubGrid .dock-group>.dock-locked>.dub-panel-heading{cursor:default}
+#dubGrid .dock-floating:has(.dock-locked) .panel-title,#dubGrid .dock-floating:has(.dock-locked) .dub-panel-heading{cursor:default}
 
 /* Cards recolhidos permanecem no próprio encaixe; o painel vizinho ocupa o espaço liberado. */
 #dubGrid .dock-group.dock-all-collapsed>.dock-tabs{display:none}

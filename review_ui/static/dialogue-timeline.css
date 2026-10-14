@@ -9,6 +9,10 @@
 .timeline-heading{min-width:0}
 .dialogue-timeline-tools .button:disabled,.dub-timeline-tools .button:disabled{opacity:.45;cursor:not-allowed}
 .timeline-dialogue-point{width:16px!important;height:29px!important;top:0!important;z-index:5!important;padding:0!important;border:0!important;border-radius:0!important;background:transparent!important;box-shadow:none!important;transform:translateX(-50%)!important;touch-action:none}
+.timeline-event{top:var(--timeline-event-top,11px)}
+.timeline-dialogue-point{top:var(--timeline-point-top,0px)!important}
+.timeline-event.duplicate{outline:1px dashed #e0c4ff;outline-offset:2px}
+.timeline-dialogue-point.duplicate svg{filter:drop-shadow(0 0 3px #e0c4ff)}
 .timeline-dialogue-point svg{display:block;width:16px;height:29px;overflow:visible;color:var(--character-color,#65a7ff);fill:none;stroke:currentColor;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round;filter:drop-shadow(0 1px 2px #000)}
 .timeline-dialogue-point svg .pin-head{fill:var(--character-color,#65a7ff);fill-opacity:.72;stroke:#d8e8ff;stroke-opacity:.8;stroke-width:1}
 .timeline-dialogue-point svg .pin-stem{stroke-opacity:.42;stroke-width:2;stroke-linecap:butt}

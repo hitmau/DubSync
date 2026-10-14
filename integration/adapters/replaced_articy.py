@@ -5,7 +5,8 @@ from datetime import datetime, timezone
 from typing import Any
 
 
-TRIGGER_TYPE = "articy_external_id"
+EXTERNAL_ID_TYPE = "articy_external_id"
+OBJECT_ID_TYPE = "articy_object_id"
 CANONICAL_EVENTS = {
     "dialogue_start", "dialogue_end", "pause", "resume", "scene_changed",
     "bridge_connected", "bridge_disconnected", "error",
@@ -35,7 +36,8 @@ def _text(value: Any, *names: str, limit: int = 500) -> str | None:
 class ReplacedArticyAdapter:
     """Normalize observed REPLACED callbacks; this class does not install game hooks.
 
-    `ExternalId` is the only accepted trigger. ShortId, speaker, text, frame number,
+    Prefer ExternalId. When the resolved DialogueFragment has no ExternalId,
+    accept its full unsigned Articy Object Id. ShortId, speaker, text, frame number,
     and video timestamp are diagnostic fields and are never promoted to a trigger.
     """
 
@@ -47,7 +49,7 @@ class ReplacedArticyAdapter:
         self._paused = False
 
     def _event(self, event_type: str, fragment: Any = None,
-               trigger_id: str | None = None, details: dict | None = None) -> dict:
+               trigger: tuple[str, str] | None = None, details: dict | None = None) -> dict:
         return {
             "event_id": f"EVT_{uuid.uuid4().hex[:16].upper()}",
             "event_type": event_type,
@@ -55,7 +57,7 @@ class ReplacedArticyAdapter:
             "game_profile_id": self.game_profile_id,
             "game_build_id": self.game_build_id,
             "language": self.language,
-            "trigger": {"type": TRIGGER_TYPE, "id": trigger_id} if trigger_id else None,
+            "trigger": {"type": trigger[0], "id": trigger[1]} if trigger else None,
             "dialogue": {
                 "short_id": _text(fragment, "ShortId", "shortId", "short_id", limit=160),
                 "speaker": _text(fragment, "speaker", "Speaker", "character", "Character", limit=160),
@@ -73,37 +75,46 @@ class ReplacedArticyAdapter:
             return None
         return result
 
+    def _trigger(self, fragment: Any) -> tuple[str, str] | None:
+        external_id = self._external_id(fragment)
+        if external_id:
+            return EXTERNAL_ID_TYPE, external_id
+        object_id = _read(fragment, "Id", "id")
+        if isinstance(object_id, int) and not isinstance(object_id, bool) and 0 < object_id <= 2**64 - 1:
+            return OBJECT_ID_TYPE, str(object_id)
+        return None
+
     def handle(self, callback: str, fragment: Any = None) -> list[dict]:
         """Return zero or more canonical events for a game callback."""
         name = str(callback or "").strip().casefold().replace("_", "")
         if name in {"initline", "dialoguestart"}:
-            external_id = self._external_id(fragment)
-            if not external_id:
+            trigger = self._trigger(fragment)
+            if not trigger:
                 return [self._event("error", details={
-                    "code": "missing_articy_external_id",
-                    "message": "InitLine did not provide Articy ExternalId; no fallback trigger was used.",
+                    "code": "missing_articy_trigger",
+                    "message": "InitLine did not provide a verified Articy identifier.",
                 })]
-            if self._active and self._active["id"] == external_id:
+            if self._active and self._active["trigger"] == trigger:
                 return []
             events = []
             if self._active:
-                events.append(self._event("dialogue_end", trigger_id=self._active["id"],
+                events.append(self._event("dialogue_end", trigger=self._active["trigger"],
                                           details={"reason": "next_dialogue_started"}))
-            self._active = {"id": external_id, "fragment": fragment}
+            self._active = {"trigger": trigger, "fragment": fragment}
             self._paused = False
-            events.append(self._event("dialogue_start", fragment, external_id))
+            events.append(self._event("dialogue_start", fragment, trigger))
             return events
 
         if name in {"releaseline", "dialogueend"}:
             if not self._active:
                 return []
-            external_id = self._external_id(fragment) if fragment is not None else None
-            if external_id and external_id != self._active["id"]:
-                return [self._event("error", fragment, external_id, {
+            trigger = self._trigger(fragment) if fragment is not None else None
+            if trigger and trigger != self._active["trigger"]:
+                return [self._event("error", fragment, trigger, {
                     "code": "release_id_mismatch",
-                    "active_trigger_id": self._active["id"],
+                    "active_trigger_id": self._active["trigger"][1],
                 })]
-            event = self._event("dialogue_end", self._active["fragment"], self._active["id"])
+            event = self._event("dialogue_end", self._active["fragment"], self._active["trigger"])
             self._active = None
             self._paused = False
             return [event]
@@ -112,13 +123,13 @@ class ReplacedArticyAdapter:
             if not self._active or self._paused:
                 return []
             self._paused = True
-            return [self._event("pause", self._active["fragment"], self._active["id"])]
+            return [self._event("pause", self._active["fragment"], self._active["trigger"])]
 
         if name in {"resume", "onresume", "unpause"}:
             if not self._active or not self._paused:
                 return []
             self._paused = False
-            return [self._event("resume", self._active["fragment"], self._active["id"])]
+            return [self._event("resume", self._active["fragment"], self._active["trigger"])]
 
         if name in {"scenechanged", "onscenechanged"}:
             scene_id = _text(fragment, "scene_id", "sceneId", "name", "Name", limit=160)
@@ -130,4 +141,4 @@ class ReplacedArticyAdapter:
 
     @property
     def active_trigger_id(self) -> str | None:
-        return self._active["id"] if self._active else None
+        return self._active["trigger"][1] if self._active else None

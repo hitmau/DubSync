@@ -209,6 +209,6 @@
 
   void refreshProject();
   void refresh();
-  setInterval(() => { if (!dialog.open) void refresh(); }, 2000);
+  setInterval(() => { if (!dialog.open) void refresh(); }, 15000);
   window.addEventListener("resize", () => { if (dialog.open) renderDetails(); });
 })();

@@ -23,7 +23,7 @@ def main() -> None:
             status=200, content_type="application/json", body='{"sessions":[]}'))
         page.route("**/api/events**", lambda route: route.fulfill(
             status=200, content_type="application/json", body='{"events":[]}'))
-        response = page.goto("http://127.0.0.1:8766/", wait_until="networkidle")
+        response = page.goto("http://127.0.0.1:8766/projects/replaced/capture", wait_until="networkidle")
         assert response and response.status == 200
         page.wait_for_selector("#videoOverview")
 

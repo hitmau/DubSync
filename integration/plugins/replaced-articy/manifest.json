@@ -3,10 +3,13 @@
   "version": "0.1.0",
   "api_version": 1,
   "name": "REPLACED Articy Runtime",
-  "description": "Contrato inicial do adaptador REPLACED/Articy; o hook real ainda depende da validação do loader IL2CPP.",
+  "description": "Plugin BepInEx IL2CPP para localizar takes aprovados pelo texto do diálogo e tocá-los no FMOD do jogo; correlações Articy salvas ficam como alternativa.",
   "engines": ["Unity IL2CPP"],
   "games": ["replaced"],
-  "capabilities": ["dialogue_start", "dialogue_end", "pause", "resume", "scene_changed", "external_audio"],
-  "entrypoint": "integration/adapters/replaced_articy.py",
+  "trigger_types": ["articy_external_id", "articy_object_id"],
+  "capabilities": ["dialogue_start", "dialogue_end", "automatic_text_match", "in_game_fmod_audio", "saved_trigger_fallback"],
+  "entrypoint": "integration/plugins/replaced-articy/runtime/DubSync.ReplacedProbe.csproj",
+  "runtime_hook_instrumented": true,
+  "runtime_callback_observed": true,
   "runtime_hook_confirmed": false
 }

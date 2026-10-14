@@ -31,6 +31,34 @@
   let floatMove = null;
   let floatFront = 30;
 
+  function isLocked(id) { return panels.get(id)?.classList.contains("dock-locked") || false; }
+
+  function updateLockControl(panel) {
+    if (!panel) return;
+    const locked = isLocked(panel.id);
+    const button = panel.querySelector(":scope > * .dock-lock-toggle");
+    if (button) {
+      const label = locked ? "Permitir mover " + names.get(panel.id) : "Impedir mover " + names.get(panel.id);
+      button.innerHTML = locked
+        ? '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 9.9-1"/></svg>'
+        : '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>';
+      button.title = label;
+      button.setAttribute("aria-label", label);
+      button.setAttribute("aria-pressed", String(locked));
+    }
+    const header = panelHeader(panel);
+    if (header) header.draggable = !locked && !panel.closest(".dock-floating");
+    document.querySelectorAll('.dock-tab[data-panel-id="' + panel.id + '"]').forEach((tab) => { tab.draggable = !locked; });
+  }
+
+  function setPanelLocked(panel, locked) {
+    if (!panel) return;
+    panel.classList.toggle("dock-locked", locked);
+    updateLockControl(panel);
+    save();
+    afterLayout();
+  }
+
   function makeGroupNode(ids, active) {
     return { type: "group", panelIds: [...ids], active: active || ids[0], element: null };
   }
@@ -168,7 +196,7 @@
         tab.classList.toggle("dock-tab-minimized", isCollapsed);
         if (isCollapsed) tab.title = "Restaurar " + names.get(panel.id);
         tab.dataset.panelId = panel.id;
-        tab.draggable = true;
+        tab.draggable = !isLocked(panel.id);
         tab.setAttribute("role", "tab");
         tab.setAttribute("aria-selected", String(panel.id === id));
         tab.addEventListener("click", () => {
@@ -363,6 +391,7 @@
       version: 4,
       tree: serializeNode(layoutTree),
       collapsed: panelIds.filter((id) => panels.get(id)?.classList.contains("dock-collapsed")),
+      locked: panelIds.filter((id) => panels.get(id)?.classList.contains("dock-locked")),
       floats: [...floatLayer.querySelectorAll(":scope > .dock-group")].map((group) => ({
         panels: groupPanelElements(group).map((panel) => panel.id),
         active: group.dataset.active,
@@ -387,8 +416,10 @@
       const button = panel?.querySelector(":scope > * .dock-float-toggle");
       if (!button) continue;
       const floating = Boolean(panel.closest(".dock-floating"));
+      const locked = isLocked(id);
       button.textContent = floating ? "▣" : "▢";
-      button.title = floating ? "Encaixar " + names.get(id) + " novamente" : "Destacar " + names.get(id) + " como quadro flutuante";
+      button.disabled = locked;
+      button.title = locked ? "Desbloqueie " + names.get(id) + " para mover ou destacar" : floating ? "Encaixar " + names.get(id) + " novamente" : "Destacar " + names.get(id) + " como quadro flutuante";
       button.setAttribute("aria-label", button.title);
     }
     window.dispatchEvent(new Event("resize"));
@@ -486,7 +517,7 @@
         const missingNode = joinGroups(otherMissing.map((id) => ({ panels: [id], active: id, weight: 1 })), "x");
         tree = tree ? makeSplit("x", tree, missingNode, .8) : missingNode;
       }
-      return { tree, floats, collapsed: (saved.collapsed || []).filter((id) => panels.has(id)), homes: saved.homes || {} };
+      return { tree, floats, collapsed: (saved.collapsed || []).filter((id) => panels.has(id)), locked: (saved.locked || []).filter((id) => panels.has(id)), homes: saved.homes || {} };
     } catch { return null; }
   }
 
@@ -513,8 +544,7 @@
     group.classList.toggle("dock-compact", Boolean(activePanel?.classList.contains("dock-collapsed")));
     for (const panel of groupPanelElements(group)) {
       if (floating) panel.classList.remove("dock-collapse-vertical");
-      const header = panelHeader(panel);
-      if (header) header.draggable = !floating;
+      updateLockControl(panel);
     }
     if (floating && !group.querySelector(":scope > .float-resize")) {
       const grip = document.createElement("button");
@@ -530,6 +560,7 @@
     if (event.button !== 0) return;
     const group = event.target.closest(".dock-floating");
     if (!group || group.parentElement !== floatLayer) return;
+    if (!event.target.closest(".float-resize") && groupPanelElements(group).some((panel) => isLocked(panel.id))) return;
     group.style.zIndex = String(++floatFront);
     const grip = event.target.closest(".float-resize");
     const header = event.target.closest(".panel-title,.dub-panel-heading");
@@ -651,7 +682,8 @@
 
   function dockPanel(panelId, targetGroup, place) {
     const panel = panels.get(panelId);
-    if (!panel) return;
+    if (!panel || isLocked(panelId)) return;
+    if (place === "tab" && targetGroup && groupPanelElements(targetGroup).some((item) => isLocked(item.id))) return;
     const sourceGroup = panel.parentElement?.closest(".dock-group");
     if (!sourceGroup) return;
     if (sourceGroup === targetGroup && (place === "tab" || groupPanelElements(sourceGroup).length === 1)) {
@@ -690,7 +722,7 @@
 
   function floatPanel(panelId, geometry) {
     const panel = panels.get(panelId);
-    if (!panel) return;
+    if (!panel || isLocked(panelId)) return;
     const sourceGroup = panel.parentElement?.closest(".dock-group");
     if (!sourceGroup || sourceGroup.parentElement === floatLayer) return;
     const panelRect = panel.getBoundingClientRect();
@@ -729,7 +761,7 @@
       return;
     }
     const id = event.currentTarget.dataset.panelId;
-    if (!panels.has(id)) return;
+    if (!panels.has(id) || isLocked(id)) { event.preventDefault(); return; }
     draggingId = id;
     event.dataTransfer.effectAllowed = "move";
     event.dataTransfer.setData("text/plain", id);
@@ -808,6 +840,15 @@
       floatButton.addEventListener("click", (event) => { event.stopPropagation(); toggleFloat(id); });
       actions.append(floatButton);
 
+      const lockButton = document.createElement("button");
+      lockButton.type = "button";
+      lockButton.className = "dock-lock-toggle";
+      lockButton.addEventListener("click", (event) => {
+        event.stopPropagation();
+        setPanelLocked(panel, !isLocked(id));
+      });
+      actions.append(lockButton);
+
       const collapse = document.createElement("button");
       collapse.type = "button";
       collapse.className = "dock-collapse";
@@ -826,7 +867,7 @@
       });
       actions.append(collapse);
 
-      header.draggable = true;
+      header.draggable = !isLocked(id);
       header.dataset.panelId = id;
       header.title = "Arraste o cabeçalho até uma borda para encaixar acima, abaixo, à esquerda ou à direita; no centro, crie uma aba. Os demais cards se ajustam junto.";
       header.addEventListener("dragstart", startDrag);
@@ -849,6 +890,7 @@
       const panel = panels.get(id);
       setPanelCollapsed(panel, true);
     }
+    for (const id of restored?.locked || []) panels.get(id).classList.add("dock-locked");
     layoutTree = restored?.tree || defaultLayout();
     for (const saved of restored?.floats || []) {
       const ids = saved.panels.filter((id) => panels.has(id));
@@ -860,6 +902,7 @@
       syncFloating(group);
     }
     renderLayout();
+    for (const panel of panels.values()) updateLockControl(panel);
     root.addEventListener("dragover", handleDragOver);
     root.addEventListener("drop", handleDrop);
     floatLayer.addEventListener("dragover", handleDragOver);

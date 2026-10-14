@@ -170,6 +170,32 @@ body {
   font-size: 8px;
 }
 
+.dub-video-overview .dub-delete-block {
+  display: inline-grid;
+  flex: 0 0 25px;
+  width: 25px;
+  height: 23px;
+  padding: 3px;
+  color: #ff9a9f;
+  border-color: #70434b;
+}
+
+.dub-video-overview .dub-delete-block svg {
+  width: 14px;
+  height: 14px;
+}
+
+.dub-video-overview .dub-delete-block:hover:not(:disabled) {
+  color: #fff;
+  border-color: #e65d66;
+  background: #6b2b35;
+}
+
+.dub-video-overview .dub-delete-block:disabled {
+  opacity: .4;
+  cursor: not-allowed;
+}
+
 .dub-video-overview .dub-global-actions {
   gap: 4px;
 }

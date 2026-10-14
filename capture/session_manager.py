@@ -24,6 +24,7 @@ from ..detector.visual import Region
 from ..events.processor import DialogueProcessor
 from ..ocr.engine import OcrEngine
 from .file_source import FileVideoSource, probe_video_duration
+from .video_plan import linked_video_chain, video_identity
 from .youtube_download import download_best_video, validate_youtube_url
 from .youtube_source import YoutubeFrameSource, video_canvas_snapshot, youtube_watch_url
 from ..projects.context import current_project_id
@@ -721,9 +722,95 @@ class SessionManager:
         return self.start_file(
             source_path, start, actual, previous["language"], config.get("regions", []),
             continuation={"block_index": block_index, "previous_session_id": previous_session_id,
+                          "sector_index": int(config.get("sector_index", 1)),
                           "block_duration_requested": float(duration_seconds),
                           "block_duration_clamped": actual < float(duration_seconds)},
         )
+
+    def _sector_root(self, session_id: str) -> tuple[dict, list[dict]]:
+        sessions = self.store.sessions(limit=100_000)
+        chain = linked_video_chain(sessions, session_id)
+        if not chain:
+            raise KeyError(session_id)
+        identity = video_identity(chain[-1])
+        root = chain[-1]
+        for item in reversed(chain[:-1]):
+            if video_identity(item) != identity:
+                break
+            root = item
+        return root, chain
+
+    def plan_next_video(self, session_id: str, path: str, block_duration_seconds: float) -> dict:
+        validate_duration(block_duration_seconds, 0)
+        current = self.store.session(session_id)
+        if not current:
+            raise KeyError(session_id)
+        if current["source_type"] not in {"file", "youtube"}:
+            raise ValueError("Selecione uma captura de vídeo para planejar a continuação.")
+        root, chain = self._sector_root(session_id)
+        if root["state"] != "complete":
+            raise ValueError("Conclua o primeiro bloco deste vídeo antes de planejar o próximo arquivo.")
+        source_path = (current.get("config_json") or {}).get("downloaded_path") or (current.get("config_json") or {}).get("path")
+        if not source_path:
+            raise ValueError("O vídeo atual não está disponível como arquivo local.")
+        next_path = Path(path).expanduser().resolve(strict=True)
+        if not next_path.is_file():
+            raise ValueError("Selecione um arquivo de vídeo local válido.")
+        existing_paths = [((item.get("config_json") or {}).get("downloaded_path") or
+                           (item.get("config_json") or {}).get("path")) for item in chain]
+        if any(path_value and os.path.normcase(str(next_path)) == os.path.normcase(
+                str(Path(path_value).expanduser().resolve(strict=False))) for path_value in existing_paths):
+            raise ValueError("Este arquivo já está na sequência. Use a lista de vídeos para voltar a ele.")
+        if any(video_identity(item) != video_identity(root) for item in chain[chain.index(root) + 1:]):
+            raise ValueError("Este setor já foi continuado em outro vídeo.")
+        duration = probe_video_duration(next_path)
+        planned = {"path": str(next_path), "duration": duration,
+                   "block_duration_seconds": float(block_duration_seconds),
+                   "size": next_path.stat().st_size, "mtime_ns": next_path.stat().st_mtime_ns}
+        config = dict(root.get("config_json") or {})
+        config["planned_next_video"] = planned
+        self.store.update_session_config(root["session_id"], config)
+        last = chain[-1]
+        last_config = last.get("config_json") or {}
+        last_end = float(last["source_start"]) + float(last_config.get("duration") or last["requested_duration"])
+        remaining = max(0.0, float(last_config.get("video_duration") or 0) - last_end)
+        current_step = float(last_config.get("block_duration_requested") or 1200)
+        first_index = int(last_config.get("block_index", 1)) + math.ceil(max(0, remaining - 1e-6) / current_step) + 1
+        return {"planned_next_video": planned, "first_block_index": first_index}
+
+    def next_file_video(self, previous_session_id: str) -> dict:
+        previous = self.store.session(previous_session_id)
+        if not previous:
+            raise KeyError(previous_session_id)
+        if previous["state"] != "complete":
+            raise ValueError("Aguarde a conclusão do bloco atual antes de continuar.")
+        config = previous.get("config_json") or {}
+        end = float(previous["source_start"]) + float(config.get("duration") or previous["requested_duration"])
+        if end < float(config.get("video_duration") or 0) - .001:
+            raise ValueError("Ainda há trechos neste vídeo. Use Próximo bloco antes de mudar de arquivo.")
+        root, chain = self._sector_root(previous_session_id)
+        planned = (self.store.session(root["session_id"]).get("config_json") or {}).get("planned_next_video") or {}
+        if not planned.get("path"):
+            raise ValueError("Adicione o próximo vídeo antes de iniciar outro setor.")
+        if any((item.get("config_json") or {}).get("previous_session_id") == previous_session_id
+               for item in self.store.sessions(limit=100_000)):
+            raise ValueError("O próximo bloco desta sessão já existe. Abra-o na linha de progresso.")
+        next_path = Path(planned["path"]).expanduser().resolve(strict=True)
+        if (next_path.stat().st_size != planned.get("size") or
+                next_path.stat().st_mtime_ns != planned.get("mtime_ns")):
+            raise ValueError("O próximo vídeo mudou desde o planejamento. Adicione o arquivo novamente.")
+        duration = probe_video_duration(next_path)
+        if abs(duration - float(planned["duration"])) > .1:
+            raise ValueError("A duração do próximo vídeo mudou. Adicione o arquivo novamente.")
+        step = float(planned["block_duration_seconds"])
+        result = self.start_file(
+            str(next_path), 0, min(step, duration), previous["language"], config.get("regions", []),
+            continuation={"block_index": int(config.get("block_index", 1)) + 1,
+                          "previous_session_id": previous_session_id,
+                          "sector_index": int(config.get("sector_index", 1)) + 1,
+                          "block_duration_requested": step},
+        )
+        return result
 
     def resume_file(self, session_id: str) -> dict:
         """Continue a paused block at its saved timestamp, or retry an empty failed block."""

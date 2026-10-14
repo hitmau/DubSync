@@ -70,3 +70,7 @@
 .cover-picker b{align-self:center;color:#fff;font-size:10px}
 .cover-picker small{align-self:center;margin:0;color:#e0ebf0;font-size:8px;font-weight:600}
 @media(max-width:720px){.wizard-identity-layout{grid-template-columns:1fr;gap:15px}.wizard-cover-field{padding:11px}.cover-picker{min-height:155px}}
+.wizard-path-row{display:flex;align-items:center;gap:9px;min-width:0;margin-top:6px}
+.wizard-path-row input{flex:1;min-width:0;margin:0}
+.wizard-path-row button{flex:none;white-space:nowrap}
+@media(max-width:620px){.wizard-path-row{align-items:stretch;flex-direction:column}}

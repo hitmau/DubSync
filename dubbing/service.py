@@ -13,16 +13,18 @@ from urllib.parse import parse_qs, urlparse
 
 from sqlalchemy import func, select
 
+from ..capture.video_plan import build_video_plan, estimated_block_total
 from ..database.models import (
     AudioTake, AudioTakeReview, CaptureLink, CaptureTraversal, DialogueLine,
     DialogueOccurrence, DubbingCharacter, DubbingProject, DubbingRoute,
     DubbingScene, EventRecord, InterpretationPreset, RoiCharacterRecord,
-    SceneEdge, SessionRecord, TtsJob, VoiceProfile, VoiceReferenceAsset,
+    SceneEdge, SessionRecord, TtsJob, VoiceDesignCandidate, VoiceProfile, VoiceReferenceAsset,
 )
 from ..database.store import DubSyncStore, utc_now
 from ..events.normalize import normalize_text
 from ..projects.context import current_project_id
-from .audio import data_path, normalize_reference, sha256_file, MAX_REFERENCE_BYTES
+from .audio import data_path, normalize_reference, sha256_file, wav_duration_ms, MAX_REFERENCE_BYTES
+from .voice_design import validate_voice_design
 
 
 VOICE_EMOTIONS = {
@@ -340,17 +342,58 @@ class DubbingService:
             rows = db.scalars(select(SessionRecord).where(
                 SessionRecord.project_id == self.project_id,
             ).order_by(SessionRecord.created_at.desc())).all()
-            result = []
+            grouped: dict[str, list[dict]] = defaultdict(list)
             for row in rows:
                 count = db.scalar(select(func.count(CaptureLink.capture_link_id)).where(
                     CaptureLink.session_id == row.session_id,
                 )) or 0
-                result.append({
+                item = {
                     "session_id": row.session_id, "source_type": row.source_type, "state": row.state,
                     "source_start": row.source_start, "duration": row.requested_duration,
                     "language": row.language, "created_at": json_value(row.created_at), "line_count": int(count),
-                })
-            return result
+                    "config_json": row.config_json or {}, "source_uri": row.source_uri,
+                }
+                grouped[self._video_identity(item)].append(item)
+
+            all_items = [item for group in grouped.values() for item in group]
+            chain_totals: dict[str, int] = {}
+            visited_roots: set[str] = set()
+            for item in all_items:
+                plan = build_video_plan([dict(value) for value in all_items], item["session_id"])
+                chain = plan["sessions"]
+                if not chain or chain[0]["session_id"] in visited_roots:
+                    continue
+                visited_roots.add(chain[0]["session_id"])
+                if len(plan["sectors"]) > 1:
+                    total = estimated_block_total(plan)
+                    chain_totals.update({value["session_id"]: total for value in chain})
+
+            for group in grouped.values():
+                ordered = sorted(group, key=lambda item: (
+                    int((item["config_json"] or {}).get("block_index") or 0),
+                    float(item["source_start"] or 0), item["created_at"] or "",
+                ))
+                configured_indexes = [int((item["config_json"] or {}).get("block_index") or 0)
+                                      for item in ordered]
+                step = next((float((item["config_json"] or {}).get("block_duration_requested") or 0)
+                             for item in ordered
+                             if float((item["config_json"] or {}).get("block_duration_requested") or 0) > 0), 0.0)
+                video_duration = next((float((item["config_json"] or {}).get("video_duration") or 0)
+                                       for item in ordered
+                                       if float((item["config_json"] or {}).get("video_duration") or 0) > 0), 0.0)
+                if step <= 0:
+                    step = next((float(item["duration"] or 0) for item in ordered
+                                 if float(item["duration"] or 0) > 0), 0.0)
+                highest_index = max([*configured_indexes, len(ordered), 1])
+                total_blocks = max(highest_index, int((video_duration + step - 1e-6) // step)
+                                   if video_duration > 0 and step > 0 else highest_index)
+                for position, item in enumerate(ordered, start=1):
+                    item["block_index"] = max(1, int((item["config_json"] or {}).get("block_index") or position))
+                    item["block_total"] = chain_totals.get(item["session_id"], total_blocks)
+                    item.pop("config_json", None)
+                    item.pop("source_uri", None)
+
+            return [item for group in grouped.values() for item in group]
 
     def overview(self, session_id: str | None = None) -> dict:
         with self.store.Session() as db:
@@ -395,8 +438,9 @@ class DubbingService:
                 "summary": {
                     "total": total, "eligible": eligible,
                     "pending": editorial["pending"], "discarded": editorial["discarded"],
-                    "generated": take_counts["generated"] + take_counts["review"] + take_counts["approved"],
-                    "review": take_counts["review"], "approved": take_counts["approved"],
+                    "generated": sum(take_counts[key] for key in ("generated", "publishing", "ready", "approved", "review")),
+                    "review": take_counts["generated"] + take_counts["publishing"] + take_counts["review"],
+                    "approved": take_counts["ready"] + take_counts["approved"],
                     "errors": take_counts["error"], "queued": take_counts["queued"] + take_counts["generating"],
                     "eligible_missing_voice": sum(int(value) for _, value in missing_voice),
                 },
@@ -425,6 +469,7 @@ class DubbingService:
                     reference = db.get(VoiceReferenceAsset, profile.reference_asset_id) if profile.reference_asset_id else None
                     ready = self._profile_ready(profile, reference)
                     items.append({**model_dict(profile), "ready": ready,
+                                  "voice_effect": str((profile.generation_settings_json or {}).get("voice_effect") or "none"),
                                   "reference": model_dict(reference) if reference else None})
                 photo_version = (str(int(legacy.updated_at.timestamp() * 1000))
                                  if legacy and legacy.photo_name and legacy.updated_at else "")
@@ -570,9 +615,13 @@ class DubbingService:
         if not profile.active or not profile.use_authorized:
             return False
         if profile.voice_mode == "design":
-            # Design instructions can be auditioned, but cannot lock a repeatable
-            # speaker identity for production takes.
-            return False
+            # A designed voice is ready for production after one generated
+            # candidate is explicitly chosen as the profile's official voice.
+            return bool(
+                profile.provider_voice_key == "dubsync:design-candidate"
+                and reference and reference.source_type == "design_candidate"
+                and reference.quality_status == "ready" and reference.normalized_path
+            )
         return bool(reference and reference.quality_status == "ready" and reference.normalized_path)
 
     def _line_rows(self, db, session_id: str | list[str] | None = None):
@@ -647,11 +696,12 @@ class DubbingService:
                     continue
                 if status == "without-take" and takes:
                     continue
-                if status == "review" and not any(t["status"] == "review" for t in takes):
+                if status == "review" and (not takes or takes[0]["status"] not in
+                                            {"generated", "publishing", "review"}):
                     continue
-                if status == "approved" and not any(t["status"] == "approved" for t in takes):
+                if status == "approved" and not any(t["status"] in {"ready", "approved"} for t in takes):
                     continue
-                if status == "error" and not any(t["status"] == "error" for t in takes):
+                if status == "error" and not any(t["status"] in {"error", "publish_error"} for t in takes):
                     continue
                 if character_id and line.character_id != character_id:
                     continue
@@ -796,9 +846,21 @@ class DubbingService:
         if not 0.5 <= speed <= 2.0:
             raise DubbingError("invalid_speed", "A velocidade deve ficar entre 0,5× e 2×.")
         instruct = str(body.get("default_instruct") or "")[:2000]
+        if mode == "design" and instruct.strip():
+            try:
+                instruct = validate_voice_design(instruct)
+            except ValueError as error:
+                raise DubbingError("invalid_voice_design", str(error)) from error
+        default_direction = str(body.get("default_direction") or "")[:2000]
         preset_key = str(body.get("preset_key") or "").strip()[:160] or None
         preview_text = str(body.get("preview_text") or "")[:1000]
         generation_settings = normalize_generation_settings(body.get("generation_settings", {}))
+        voice_effect = str(body.get("voice_effect") or "none").strip().lower()
+        if voice_effect not in {"none", "raspy", "robotic"}:
+            raise DubbingError("invalid_voice_effect", "Escolha um acabamento vocal válido.")
+        # Keep app metadata beside the profile settings; the normalizer strips
+        # it before provider requests and no schema migration is required.
+        generation_settings["voice_effect"] = voice_effect
         authorized = bool(body.get("use_authorized", False))
         with self.store.Session.begin() as db:
             character = db.get(DubbingCharacter, character_id)
@@ -814,7 +876,8 @@ class DubbingService:
                     voice_profile_id=new_id("VP"), character_id=character_id, language=language,
                     name=name, provider="omnivoice", provider_voice_key=None, preset_key=preset_key, voice_mode=mode,
                     reference_asset_id=None, reference_text=None, preview_text=preview_text, default_speed=speed,
-                    default_instruct=instruct, generation_settings_json=generation_settings,
+                    default_instruct=instruct, default_direction=default_direction,
+                    generation_settings_json=generation_settings,
                     use_authorized=authorized, active=True, status="missing_reference",
                     created_at=utc_now(), updated_at=utc_now(),
                 )
@@ -822,6 +885,7 @@ class DubbingService:
             else:
                 profile.name, profile.language, profile.voice_mode = name, language, mode
                 profile.default_speed, profile.default_instruct = speed, instruct
+                profile.default_direction = default_direction
                 profile.generation_settings_json = generation_settings
                 profile.preset_key = preset_key
                 profile.use_authorized = authorized
@@ -830,7 +894,14 @@ class DubbingService:
             if not profile.active:
                 profile.status = "inactive"
             elif mode == "design":
-                profile.status = "needs_voice_candidate" if authorized and instruct else (
+                reference = db.get(VoiceReferenceAsset, profile.reference_asset_id) if profile.reference_asset_id else None
+                official_candidate = bool(
+                    profile.provider_voice_key == "dubsync:design-candidate"
+                    and reference and reference.source_type == "design_candidate"
+                    and reference.quality_status == "ready" and reference.normalized_path
+                )
+                profile.status = "ready" if authorized and official_candidate else (
+                    "needs_voice_candidate" if authorized and instruct else
                     "needs_voice_attributes" if authorized else "needs_authorization")
             elif not authorized:
                 profile.status = "needs_authorization"
@@ -861,7 +932,13 @@ class DubbingService:
             if not profile.active:
                 profile.status = "inactive"
             elif profile.voice_mode == "design":
-                profile.status = "needs_voice_candidate" if profile.use_authorized and profile.default_instruct else (
+                official_candidate = bool(
+                    profile.provider_voice_key == "dubsync:design-candidate"
+                    and reference and reference.source_type == "design_candidate"
+                    and reference.quality_status == "ready" and reference.normalized_path
+                )
+                profile.status = "ready" if profile.use_authorized and official_candidate else (
+                    "needs_voice_candidate" if profile.use_authorized and profile.default_instruct else
                     "needs_voice_attributes" if profile.use_authorized else "needs_authorization")
             elif not profile.use_authorized:
                 profile.status = "needs_authorization"
@@ -893,6 +970,12 @@ class DubbingService:
             profile = db.get(VoiceProfile, voice_profile_id)
             if not profile:
                 raise DubbingError("voice_profile_not_found", "Perfil vocal não encontrado.", 404)
+            candidates = db.scalars(select(VoiceDesignCandidate).where(
+                VoiceDesignCandidate.voice_profile_id == voice_profile_id,
+            )).all()
+            if any(candidate.status in {"queued", "generating"} for candidate in candidates):
+                raise DubbingError("voice_candidates_in_progress",
+                                   "Aguarde a geração dos candidatos terminar antes de remover o perfil.", 409)
             takes = int(db.scalar(select(func.count(AudioTake.take_id)).where(
                 AudioTake.voice_profile_id == voice_profile_id)) or 0)
             if takes:
@@ -907,6 +990,10 @@ class DubbingService:
                     files_to_remove.extend((data_path(self.data_root, asset.original_path),
                                             data_path(self.data_root, asset.normalized_path)))
                     db.delete(asset)
+                for candidate in candidates:
+                    if candidate.audio_path:
+                        files_to_remove.append(data_path(self.data_root, candidate.audio_path))
+                    db.delete(candidate)
                 for character in db.scalars(select(DubbingCharacter).where(
                     DubbingCharacter.default_voice_profile_id == voice_profile_id)).all():
                     character.default_voice_profile_id = None
@@ -918,6 +1005,98 @@ class DubbingService:
             except OSError:
                 pass
         return result
+
+    def create_design_candidates(self, voice_profile_id: str, text: str, instruct: str,
+                                 count: int, speed: float, generation_settings: dict) -> dict:
+        profile = self.profile(voice_profile_id)
+        if profile.get("character", {}).get("project_id") != self.project_id:
+            raise DubbingError("voice_profile_not_found", "Perfil de voz não encontrado neste projeto.", 404)
+        if not profile["active"] or not profile["use_authorized"] or profile["voice_mode"] != "design":
+            raise DubbingError("profile_not_authorized", "Ative e autorize um perfil no modo Gerar voz antes de criar candidatos.", 409)
+        normalized_instruct = str(instruct or "").strip()
+        if not normalized_instruct or profile.get("default_instruct", "").strip() != normalized_instruct:
+            raise DubbingError("voice_attributes_unsaved", "Salve os atributos atuais do perfil antes de gerar candidatos.", 409)
+        try:
+            validate_voice_design(normalized_instruct)
+        except ValueError as error:
+            raise DubbingError("invalid_voice_design", str(error)) from error
+        clean_text = " ".join(str(text or "").split())
+        if not clean_text:
+            raise DubbingError("voice_candidate_text_required", "Digite o texto que será usado nos candidatos.")
+        if not 1 <= int(count) <= 10:
+            raise DubbingError("voice_candidate_count_invalid", "Escolha entre 1 e 10 cópias por geração.")
+        if not 0.5 <= float(speed) <= 2.0:
+            raise DubbingError("invalid_speed", "A velocidade deve ficar entre 0,5× e 2×.")
+        settings = normalize_generation_settings(generation_settings)
+        batch_id = new_id("VDBATCH")
+        now = utc_now()
+        created = []
+        with self.store.Session.begin() as db:
+            saved = db.get(VoiceProfile, voice_profile_id)
+            owner = db.get(DubbingCharacter, saved.character_id) if saved else None
+            if not saved or not owner or owner.project_id != self.project_id:
+                raise DubbingError("voice_profile_not_found", "Perfil de voz não encontrado neste projeto.", 404)
+            if (not saved.active or not saved.use_authorized or saved.voice_mode != "design"
+                    or saved.default_instruct.strip() != normalized_instruct):
+                raise DubbingError("voice_attributes_changed", "O perfil mudou. Atualize-o e tente gerar novamente.", 409)
+            project = db.get(DubbingProject, self.project_id)
+            if not project:
+                raise DubbingError("project_not_found", "Projeto não encontrado.", 404)
+            for index in range(1, int(count) + 1):
+                candidate_id = new_id("VDC")
+                row = VoiceDesignCandidate(
+                    candidate_id=candidate_id, voice_profile_id=voice_profile_id,
+                    batch_id=batch_id, candidate_index=index, status="queued",
+                    text_used=clean_text, instruct_used=normalized_instruct, speed_used=float(speed),
+                    generation_settings_json=settings,
+                    audio_path=f"projects/{project.slug}/dubbing/voices/{voice_profile_id}/candidates/{candidate_id}.wav",
+                    created_at=now, updated_at=now,
+                )
+                db.add(row)
+                created.append(model_dict(row))
+        return {"batch_id": batch_id, "count": len(created), "items": created}
+
+    def list_design_candidates(self, voice_profile_id: str, limit: int = 100) -> list[dict]:
+        profile = self.profile(voice_profile_id)
+        if profile.get("character", {}).get("project_id") != self.project_id:
+            raise DubbingError("voice_profile_not_found", "Perfil de voz não encontrado neste projeto.", 404)
+        with self.store.Session() as db:
+            rows = db.scalars(select(VoiceDesignCandidate).where(
+                VoiceDesignCandidate.voice_profile_id == voice_profile_id,
+            ).order_by(VoiceDesignCandidate.created_at.desc(), VoiceDesignCandidate.candidate_index)
+              .limit(max(1, min(500, int(limit))))).all()
+            return [model_dict(row) for row in rows]
+
+    def design_candidates_in_batch(self, voice_profile_id: str, batch_id: str) -> list[dict]:
+        with self.store.Session() as db:
+            rows = db.scalars(select(VoiceDesignCandidate).where(
+                VoiceDesignCandidate.voice_profile_id == voice_profile_id,
+                VoiceDesignCandidate.batch_id == batch_id,
+            ).order_by(VoiceDesignCandidate.candidate_index)).all()
+            return [model_dict(row) for row in rows]
+
+    def design_candidate(self, voice_profile_id: str, candidate_id: str) -> dict:
+        profile = self.profile(voice_profile_id)
+        if profile.get("character", {}).get("project_id") != self.project_id:
+            raise DubbingError("voice_profile_not_found", "Perfil de voz não encontrado neste projeto.", 404)
+        with self.store.Session() as db:
+            row = db.get(VoiceDesignCandidate, candidate_id)
+            if not row or row.voice_profile_id != voice_profile_id:
+                raise DubbingError("voice_candidate_not_found", "Candidato não encontrado para este perfil.", 404)
+            return model_dict(row)
+
+    def update_design_candidate(self, candidate_id: str, **changes) -> dict:
+        with self.store.Session.begin() as db:
+            row = db.get(VoiceDesignCandidate, candidate_id)
+            if not row:
+                raise DubbingError("voice_candidate_not_found", "Candidato de voz não encontrado.", 404)
+            for key in ("status", "take_id", "provider_job_id", "audio_path", "duration_ms", "error_message"):
+                if key in changes:
+                    setattr(row, key, changes[key])
+            row.updated_at = utc_now()
+            if row.status in {"completed", "error"}:
+                row.completed_at = utc_now()
+            return model_dict(row)
 
     def add_reference(self, voice_profile_id: str, original: Path, normalized: Path,
                       metadata: dict, reference_text: str | None, source_type: str,
@@ -948,7 +1127,8 @@ class DubbingService:
         return result
 
     def select_design_candidate(self, voice_profile_id: str, original: Path, normalized: Path,
-                                metadata: dict, reference_text: str | None) -> dict:
+                                metadata: dict, reference_text: str | None,
+                                source_note: str | None = None) -> dict:
         profile = self.profile(voice_profile_id)
         if not profile["active"] or not profile["use_authorized"]:
             raise DubbingError("profile_not_authorized", "Ative o perfil e confirme a autorização antes de escolher uma voz.", 409)
@@ -957,19 +1137,80 @@ class DubbingService:
         duration_ms = int(metadata.get("duration_ms") or 0)
         if not 3000 <= duration_ms <= 10000:
             raise DubbingError("candidate_duration_invalid", "A voz candidata precisa ter entre 3 e 10 segundos para servir como identidade estável.", 422)
+        with self.store.Session() as db:
+            pending = db.scalar(select(VoiceDesignCandidate.candidate_id).where(
+                VoiceDesignCandidate.voice_profile_id == voice_profile_id,
+                VoiceDesignCandidate.status.in_(("queued", "generating")),
+            ).limit(1))
+            if pending:
+                raise DubbingError("voice_candidates_in_progress",
+                                   "Aguarde todas as opções terminarem antes de definir a voz oficial.", 409)
         reference = self.add_reference(
             voice_profile_id, original, normalized, metadata, reference_text,
-            "design_candidate", "Candidato OmniVoice local escolhido como voz oficial.",
+            "design_candidate", source_note or "Candidato OmniVoice local escolhido como voz oficial.",
         )
+        audition_paths = []
         with self.store.Session.begin() as db:
             saved = db.get(VoiceProfile, voice_profile_id)
             if not saved:
                 raise DubbingError("voice_profile_not_found", "Perfil de voz não encontrado.", 404)
-            saved.voice_mode = "clone"
             saved.provider_voice_key = "dubsync:design-candidate"
             saved.status = "ready" if saved.active and saved.use_authorized and metadata.get("quality_status") == "ready" else "needs_reference_review"
             saved.updated_at = utc_now()
+            candidates = db.scalars(select(VoiceDesignCandidate).where(
+                VoiceDesignCandidate.voice_profile_id == voice_profile_id,
+            )).all()
+            for candidate in candidates:
+                if candidate.status in {"queued", "generating"}:
+                    raise DubbingError("voice_candidates_in_progress",
+                                       "Aguarde todas as opções terminarem antes de definir a voz oficial.", 409)
+                if candidate.audio_path:
+                    audition_paths.append(candidate.audio_path)
+                db.delete(candidate)
+        for relative in audition_paths:
+            try:
+                data_path(self.data_root, relative).unlink(missing_ok=True)
+            except OSError:
+                pass
         return {"reference": reference, "profile": self.profile(voice_profile_id)}
+
+    def cleanup_official_design_auditions(self) -> dict:
+        """Remove old candidate auditions while preserving each chosen official reference."""
+        deleted_profiles = 0
+        deleted_candidates = 0
+        paths = []
+        with self.store.Session.begin() as db:
+            profiles = db.scalars(select(VoiceProfile).join(
+                DubbingCharacter, DubbingCharacter.character_id == VoiceProfile.character_id,
+            ).where(
+                DubbingCharacter.project_id == self.project_id,
+                VoiceProfile.voice_mode == "design",
+                VoiceProfile.provider_voice_key == "dubsync:design-candidate",
+                VoiceProfile.reference_asset_id.is_not(None),
+            )).all()
+            for profile in profiles:
+                candidates = db.scalars(select(VoiceDesignCandidate).where(
+                    VoiceDesignCandidate.voice_profile_id == profile.voice_profile_id,
+                )).all()
+                if not candidates or any(item.status in {"queued", "generating"} for item in candidates):
+                    continue
+                deleted_profiles += 1
+                for candidate in candidates:
+                    if candidate.audio_path:
+                        paths.append(candidate.audio_path)
+                    db.delete(candidate)
+                    deleted_candidates += 1
+        removed_files = 0
+        for relative in paths:
+            try:
+                path = data_path(self.data_root, relative)
+                if path.is_file():
+                    path.unlink()
+                    removed_files += 1
+            except OSError:
+                pass
+        return {"profiles_cleaned": deleted_profiles, "candidates_removed": deleted_candidates,
+                "files_removed": removed_files}
 
     def approve_reference(self, reference_id: str) -> dict:
         with self.store.Session.begin() as db:
@@ -992,6 +1233,7 @@ class DubbingService:
                 raise DubbingError("voice_profile_not_found", "Perfil de voz não encontrado.", 404)
             ref = db.get(VoiceReferenceAsset, profile.reference_asset_id) if profile.reference_asset_id else None
             return {**model_dict(profile), "ready": self._profile_ready(profile, ref),
+                    "voice_effect": str((profile.generation_settings_json or {}).get("voice_effect") or "none"),
                     "reference": model_dict(ref) if ref else None,
                     "character": model_dict(db.get(DubbingCharacter, profile.character_id))}
 
@@ -1027,23 +1269,26 @@ class DubbingService:
             resolved_speed = float(speed if speed is not None else profile.default_speed)
             if not 0.5 <= resolved_speed <= 2.0:
                 raise DubbingError("invalid_speed", "A velocidade deve ficar entre 0,5× e 2×.")
-            line_instruct = str(instruct or "").strip()
-            if profile.voice_mode == "design":
-                normalized_instruct = ", ".join(part for part in (
-                    profile.default_instruct.strip(), line_instruct or self.default_instruction(
-                        line.emotion, line.emotion_intensity, line.dub_language,
-                    ),
-                ) if part)
-            elif profile.provider_voice_key == "dubsync:design-candidate":
-                normalized_instruct = line_instruct or self.default_instruction(
-                    line.emotion, line.emotion_intensity, line.dub_language,
-                )
-            else:
-                normalized_instruct = line_instruct or profile.default_instruct or self.default_instruction(
-                    line.emotion, line.emotion_intensity, line.dub_language,
-                )
+            # Production always uses the stored reference; OmniVoice's instruct
+            # parameter describes a newly designed voice, not acting direction.
+            normalized_instruct = ""
             resolved_generation_settings = normalize_generation_settings(
                 generation_settings if generation_settings else profile.generation_settings_json or {})
+            if line.dub_text.strip().casefold() == "[sigh]":
+                # A standalone non-verbal marker has no spoken words from which
+                # OmniVoice can estimate an audio length. Use the captured line
+                # duration and mild token sampling so it has frames to synthesize.
+                if occurrence.target_duration_ms:
+                    resolved_generation_settings["duration"] = max(
+                        0.1, min(60.0, occurrence.target_duration_ms / 1000),
+                    )
+                resolved_generation_settings["position_temperature"] = 1.0
+                resolved_generation_settings["class_temperature"] = 0.4
+            else:
+                resolved_generation_settings["position_temperature"] = 0.0
+                resolved_generation_settings["class_temperature"] = 0.0
+            resolved_generation_settings["voice_effect"] = str(
+                (profile.generation_settings_json or {}).get("voice_effect") or "none")
             version = (db.scalar(select(func.max(AudioTake.version)).where(
                 AudioTake.occurrence_id == occurrence_id,
             )) or 0) + 1
@@ -1129,7 +1374,7 @@ class DubbingService:
             for session_key, occurrence_id, _editorial_status, take_status in db.execute(statement):
                 if session_key in result:
                     occurrences[(session_key, occurrence_id)].add(str(take_status or ""))
-        complete_statuses = {"review", "generated", "approved", "completed"}
+        complete_statuses = {"review", "generated", "publishing", "ready", "approved", "publish_error", "completed"}
         for (session_key, _occurrence_id), statuses in occurrences.items():
             progress = result[session_key]
             progress["eligible"] += 1
@@ -1167,7 +1412,7 @@ class DubbingService:
             candidates = []
             for row in candidates_before_status:
                 statuses = {str(take.get("status") or "") for take in row.get("takes", [])}
-                if statuses & {"review", "generated", "approved", "completed"}:
+                if statuses & {"review", "generated", "publishing", "ready", "approved", "publish_error", "completed"}:
                     already_done += 1
                 elif statuses & {"queued", "generating"}:
                     already_active += 1
@@ -1282,14 +1527,24 @@ class DubbingService:
                 "errors": batch_counts["error"], "cancelled": batch_counts["cancelled"],
                 "finished": batch_finished,
                 "percent": round(batch_finished * 100 / batch_total) if batch_total else 0,
+                "publication": {
+                    "ready": sum(1 for _job, take, _line, _occurrence in batch_rows if take.status in {"ready", "approved"}),
+                    "pending": sum(1 for _job, take, _line, _occurrence in batch_rows
+                                   if take.status in {"generated", "publishing", "review"}),
+                    "errors": sum(1 for _job, take, _line, _occurrence in batch_rows
+                                  if take.status == "publish_error"),
+                },
                 "occurrences": [{
                     "occurrence_id": occurrence.occurrence_id, "status": job.status,
-                } for job, _take, _line, occurrence in batch_rows],
+                    "take_id": take.take_id, "take_status": take.status,
+                    "take_error": take.error_message,
+                } for job, take, _line, occurrence in batch_rows],
             } if latest_batch_id else None)
             visible_rows = active + [row for row in batch_rows if row not in active]
             visible_rows.sort(key=lambda row: row[0].queued_at, reverse=True)
             items = [{
                 "job_id": job.job_id, "take_id": take.take_id, "status": job.status,
+                "take_status": take.status,
                 "attempt": job.attempt, "max_attempts": job.max_attempts,
                 "character_id": line.character_id, "line_id": line.line_id,
                 "occurrence_id": occurrence.occurrence_id,
@@ -1298,6 +1553,50 @@ class DubbingService:
                 "batch_id": job.batch_id,
             } for job, take, line, occurrence in visible_rows[:30]]
             return {"counts": dict(counts), "items": items, "batch": batch}
+
+    def publish_completed_batch(self, batch_id: str) -> dict:
+        """Promote only completed, audio-backed takes from one named legacy batch."""
+        with self.store.Session.begin() as db:
+            rows = db.execute(
+                select(TtsJob, AudioTake).join(AudioTake, AudioTake.take_id == TtsJob.take_id)
+                .join(DialogueLine, DialogueLine.line_id == AudioTake.line_id)
+                .where(TtsJob.batch_id == batch_id, DialogueLine.project_id == self.project_id)
+                .order_by(TtsJob.queued_at)
+            ).all()
+            if not rows:
+                raise DubbingError("batch_not_found", "Lote de geração não encontrado neste projeto.", 404)
+            unfinished = sum(1 for job, _take in rows if job.status != "completed")
+            if unfinished:
+                raise DubbingError("batch_not_finished", "O lote ainda tem falas em geração, fila ou erro; sincronize após concluir todas.", 409)
+            promoted = []
+            for _job, take in rows:
+                if not take.audio_master_path:
+                    continue
+                if take.status in {"review", "generated", "publish_error"}:
+                    take.status = "generated"
+                    take.error_message = None
+                    promoted.append(take.take_id)
+            if not promoted:
+                raise DubbingError("batch_has_no_audio", "Este lote não tem takes pendentes de sincronização.", 409)
+            return {"batch_id": batch_id, "promoted": len(promoted), "take_ids": promoted}
+
+    def set_take_publication_status(self, take_ids: list[str], status: str,
+                                    error_message: str | None = None) -> int:
+        allowed = {"generated", "publishing", "publish_error", "ready", "superseded"}
+        if status not in allowed:
+            raise DubbingError("invalid_publication_status", "Estado de sincronização inválido.")
+        ids = list(dict.fromkeys(str(value) for value in take_ids if value))
+        if not ids:
+            return 0
+        safe_error = str(error_message or "")[:1000] or None
+        with self.store.Session.begin() as db:
+            rows = db.scalars(select(AudioTake).join(
+                DialogueLine, DialogueLine.line_id == AudioTake.line_id,
+            ).where(AudioTake.take_id.in_(ids), DialogueLine.project_id == self.project_id)).all()
+            for take in rows:
+                take.status = status
+                take.error_message = safe_error
+            return len(rows)
 
     def retry_errors(self, session_id: str | None = None, batch_id: str | None = None) -> dict:
         with self.store.Session.begin() as db:
@@ -1411,7 +1710,7 @@ class DubbingService:
             take.duration_delta_ms = delta
             take.duration_delta_percent = round(delta * 100 / target, 2) if delta is not None else None
             take.audio_master_path = take_path.relative_to(self.data_root).as_posix()
-            take.status = "review"
+            take.status = "generated"
             take.error_message = None
             job.status = "completed"
             job.finished_at = utc_now()

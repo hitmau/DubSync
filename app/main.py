@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import ipaddress
 import importlib.util
 import logging
 import mimetypes
@@ -10,7 +11,7 @@ import threading
 import uuid
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 from urllib.parse import parse_qs, unquote, urlparse
 
 import cv2
@@ -24,6 +25,7 @@ from starlette.requests import Request
 
 from ..capture.session_manager import (DATA_DIR, SESSION_DIR, VIDEO_LIBRARY_DIR, SessionManager,
                                       desktop_preview, file_preview)
+from ..capture.video_plan import build_video_plan
 from ..capture.file_source import FileVideoSource
 from ..capture.youtube_source import YoutubeFrameSource
 from ..database.store import DubSyncStore
@@ -58,6 +60,7 @@ dubbing_docker = OmniVoiceDocker(APP_DIR.parent, load_settings,
 project_service = ProjectService(store, DATA_DIR)
 project_storage = ProjectStorage(DATA_DIR)
 integration_service = IntegrationService(store, DATA_DIR)
+dubbing_worker.auto_publish_callback = integration_service.schedule_auto_publish
 
 
 @asynccontextmanager
@@ -79,7 +82,8 @@ async def lifespan(_app: FastAPI):
 app = FastAPI(title="DubSync", version="0.2.0", lifespan=lifespan)
 templates = Jinja2Templates(directory=str(REVIEW_UI_DIR / "templates"))
 app.mount("/static", StaticFiles(directory=REVIEW_UI_DIR / "static"), name="static")
-app.include_router(create_dubbing_router(dubbing_service, dubbing_worker, dubbing_docker))
+app.include_router(create_dubbing_router(dubbing_service, dubbing_worker, dubbing_docker,
+                                         auto_publish_callback=integration_service.schedule_auto_publish))
 app.include_router(create_integration_router(integration_service))
 
 
@@ -89,7 +93,7 @@ async def require_project_context(request: Request, call_next):
     project_id = None
     if path.startswith("/api/"):
         if path.startswith("/api/projects") or path in {
-            "/api/health", "/api/settings", "/api/settings/openai/test",
+            "/api/health", "/api/settings", "/api/settings/openai/test", "/api/local-picker",
         }:
             return await call_next(request)
         project_id = (request.headers.get("x-dubsync-project") or request.query_params.get("project_id") or "").strip()
@@ -118,28 +122,6 @@ async def require_project_context(request: Request, call_next):
         finally:
             reset_project_context(token)
     return await call_next(request)
-
-
-def _video_identity(session: dict) -> str:
-    config = session.get("config_json") or {}
-    video_id = str(config.get("video_id") or "").strip()
-    url = str(config.get("url") or session.get("source_uri") or "")
-    if not video_id and url:
-        parsed = urlparse(url)
-        video_id = (parse_qs(parsed.query).get("v") or [""])[0]
-        if not video_id and parsed.hostname in {"youtu.be", "www.youtu.be"}:
-            video_id = parsed.path.strip("/").split("/")[0]
-    if video_id:
-        return f"youtube:{video_id}"
-    path = config.get("downloaded_path") or config.get("path")
-    if not path and session.get("source_type") == "file":
-        path = session.get("source_uri")
-    if path:
-        try:
-            return "file:" + os.path.normcase(str(Path(path).expanduser().resolve(strict=False)))
-        except (OSError, RuntimeError):
-            return "file:" + os.path.normcase(os.path.abspath(str(path)))
-    return f"session:{session.get('session_id', '')}"
 
 
 class YoutubePrepare(BaseModel):
@@ -180,6 +162,16 @@ class NextBlockBody(BaseModel):
     duration_seconds: float = Field(gt=0, le=14400)
 
 
+class PlanNextVideoBody(BaseModel):
+    session_id: str = Field(min_length=1, max_length=36)
+    path: str = Field(min_length=1, max_length=4096)
+    block_duration_seconds: float = Field(gt=0, le=14400)
+
+
+class NextVideoBody(BaseModel):
+    previous_session_id: str = Field(min_length=1, max_length=36)
+
+
 class EventChanges(BaseModel):
     corrected_text: str | None = Field(default=None, max_length=4000)
     start_time: float | None = Field(default=None, ge=0)
@@ -195,6 +187,7 @@ class ManualEventBody(BaseModel):
     start_time: float = Field(ge=0)
     end_time: float = Field(gt=0)
     character: str | None = Field(default=None, max_length=120)
+    ocr_observation: dict[str, Any] | None = None
 
 
 class MergeEvents(BaseModel):
@@ -633,6 +626,26 @@ def next_file_block(body: NextBlockBody):
         raise HTTPException(400, str(exc)) from exc
 
 
+@app.post("/api/file/plan-next-video")
+def plan_next_video(body: PlanNextVideoBody):
+    try:
+        return manager.plan_next_video(body.session_id, body.path, body.block_duration_seconds)
+    except KeyError as exc:
+        raise HTTPException(404, "Sessão não encontrada neste projeto.") from exc
+    except (ValueError, FileNotFoundError, RuntimeError) as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
+@app.post("/api/file/next-video")
+def next_file_video(body: NextVideoBody):
+    try:
+        return manager.next_file_video(body.previous_session_id)
+    except KeyError as exc:
+        raise HTTPException(404, "Sessão anterior não encontrada neste projeto.") from exc
+    except (ValueError, FileNotFoundError, RuntimeError) as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
 @app.get("/api/roi-characters")
 def get_roi_characters(roi_id: str = Query(min_length=1, max_length=96)):
     characters = store.roi_characters(roi_id)
@@ -836,10 +849,29 @@ def list_sessions():
 
 @app.get("/api/sessions/{session_id}")
 def get_session(session_id: str):
-    value = manager.status(session_id)
+    # Completed sessions are no longer held by the live capture manager.
+    # Fall back to the project-scoped database so editing actions can reopen them.
+    value = manager.status(session_id) or store.session(session_id)
     if not value:
         raise HTTPException(404, "Sessão não encontrada.")
     return value
+
+
+@app.delete("/api/sessions/{session_id}/block")
+def delete_capture_block(session_id: str):
+    if not load_settings()["review"].get("permanent_discard", False):
+        raise HTTPException(409, "Ative a exclusão definitiva em Configurações antes de apagar este bloco.")
+    try:
+        result = store.delete_capture_session(session_id)
+    except KeyError as exc:
+        raise HTTPException(404, "Bloco não encontrado neste projeto.") from exc
+    except ValueError as exc:
+        raise HTTPException(409, str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(409, str(exc)) from exc
+    if result["deleted_occurrences"]:
+        result["game_sync"] = integration_service.schedule_auto_publish(current_project_id())
+    return result
 
 
 @app.get("/api/sessions/{session_id}/fine-sweep")
@@ -875,11 +907,9 @@ def get_video_plan(session_id: str, character_id: str | None = Query(default=Non
     current = store.session(session_id)
     if not current:
         raise HTTPException(404, "Sessão não encontrada.")
-    identity = _video_identity(current)
+    plan = build_video_plan(store.sessions(limit=100_000), session_id)
     planned_sessions = []
-    for row in store.sessions(limit=100_000):
-        if _video_identity(row) != identity:
-            continue
+    for row in plan["sessions"]:
         live = manager.status(row["session_id"]) if row["state"] in {
             "queued", "downloading", "preparing", "running", "processing", "paused", "stopping"
         } else row
@@ -891,21 +921,21 @@ def get_video_plan(session_id: str, character_id: str | None = Query(default=Non
             "requested_duration": float(live["requested_duration"]),
             "created_at": live.get("created_at"),
             "current_source_time": live.get("current_source_time"),
+            "project_start": row["project_start"],
+            "sector_index": row["sector_index"],
             "progress": live.get("progress") or live.get("stats") or {},
             "config_json": {key: config.get(key) for key in (
                 "block_index", "previous_session_id", "block_duration_requested", "duration",
                 "video_duration", "video_id", "url", "path", "downloaded_path", "start"
             ) if config.get(key) is not None},
         })
-    planned_sessions.sort(key=lambda item: (int((item["config_json"] or {}).get("block_index", 1)),
-                                           item["source_start"], item.get("created_at") or ""))
     dubbing_progress = dubbing_service.block_dubbing_progress(
         [item["session_id"] for item in planned_sessions], character_id,
     )
     for item in planned_sessions:
         item["dubbing_progress"] = dubbing_progress.get(item["session_id"], {})
-    config = current.get("config_json") or {}
-    return {"video_duration": config.get("video_duration"), "sessions": planned_sessions}
+    return {"video_duration": plan["video_duration"], "sessions": planned_sessions,
+            "sectors": plan["sectors"]}
 
 
 @app.get("/api/sessions/{session_id}/markers")
@@ -1013,6 +1043,76 @@ def organize_session_video(session_id: str):
         raise HTTPException(404, "Sessão não encontrada.") from exc
     except (ValueError, OSError) as exc:
         raise HTTPException(400, str(exc)) from exc
+
+
+class LocalPickerBody(BaseModel):
+    kind: Literal["executable", "directory", "video"]
+    initial_path: str = Field(default="", max_length=1000)
+
+
+_local_picker_lock = threading.Lock()
+
+
+@app.post("/api/local-picker")
+def select_local_path(request: Request, body: LocalPickerBody):
+    """Open a host-local Windows picker for paths the browser cannot disclose."""
+    client_host = request.client.host if request.client else ""
+    try:
+        local_client = ipaddress.ip_address(client_host).is_loopback
+    except ValueError:
+        local_client = client_host == "localhost"
+    if not local_client:
+        raise HTTPException(403, "O seletor de arquivos só pode ser aberto no computador do DubSync.")
+    if os.name != "nt":
+        raise HTTPException(501, "A seleção local está disponível no Windows.")
+    if not _local_picker_lock.acquire(blocking=False):
+        raise HTTPException(409, "Outro seletor de arquivos já está aberto.")
+    try:
+        import tkinter as tk
+        from tkinter import filedialog
+
+        initial_dir = Path.home()
+        if body.initial_path.strip():
+            candidate = Path(body.initial_path.strip()).expanduser()
+            if candidate.is_dir():
+                initial_dir = candidate
+            elif candidate.is_file():
+                initial_dir = candidate.parent
+        root = tk.Tk()
+        root.withdraw()
+        root.attributes("-topmost", True)
+        root.update()
+        try:
+            if body.kind == "directory":
+                selected = filedialog.askdirectory(
+                    parent=root, title="Localizar pasta do jogo",
+                    initialdir=str(initial_dir), mustexist=True,
+                )
+            else:
+                title = "Localizar executável do jogo" if body.kind == "executable" else "Localizar vídeo"
+                patterns = [("Executáveis Windows", "*.exe"), ("Todos os arquivos", "*.*")] if body.kind == "executable" else [
+                    ("Vídeos MP4 ou WebM", "*.mp4 *.webm"), ("Todos os arquivos", "*.*"),
+                ]
+                selected = filedialog.askopenfilename(
+                    parent=root, title=title, initialdir=str(initial_dir), filetypes=patterns,
+                )
+        finally:
+            root.destroy()
+    except Exception as exc:
+        raise HTTPException(500, f"Não foi possível abrir o seletor local: {exc}") from exc
+    finally:
+        _local_picker_lock.release()
+    if not selected:
+        return {"cancelled": True, "path": None}
+    path = Path(selected).expanduser().resolve()
+    if body.kind == "directory":
+        if not path.is_dir():
+            raise HTTPException(400, "A pasta selecionada não está mais disponível.")
+    else:
+        allowed = {".exe"} if body.kind == "executable" else {".mp4", ".webm"}
+        if path.suffix.lower() not in allowed or not path.is_file():
+            raise HTTPException(400, "O arquivo selecionado não corresponde ao tipo solicitado.")
+    return {"cancelled": False, "path": str(path)}
 
 
 @app.post("/api/video-library/select-file")
@@ -1124,11 +1224,28 @@ def bulk_discard_events(body: BulkEventSelection):
         raise HTTPException(400, str(exc)) from exc
 
 
+@app.post("/api/events/bulk-delete")
+def permanently_delete_events(body: BulkEventSelection):
+    if not load_settings()["review"].get("permanent_discard", False):
+        raise HTTPException(409, "Ative a exclusão definitiva em Configurações antes de apagar estes diálogos.")
+    try:
+        return store.permanently_delete_events(body.event_ids)
+    except KeyError as exc:
+        raise HTTPException(404, "Um dos diálogos selecionados não existe neste projeto.") from exc
+    except (ValueError, RuntimeError) as exc:
+        raise HTTPException(409, str(exc)) from exc
+
+
 @app.post("/api/events/manual")
 def create_manual_event(body: ManualEventBody):
     text_value = body.text.strip()
     if not text_value:
         raise HTTPException(400, "Informe o texto do diálogo.")
+    ocr_evidence = body.ocr_observation or {}
+    speaker_evidence = ocr_evidence.get("speaker") or {}
+    character = str(body.character or "").strip() or str(speaker_evidence.get("candidate") or "").strip()
+    if not character:
+        raise HTTPException(400, "Informe o personagem ou use o OCR na área de nome configurada.")
     session = store.session(body.session_id)
     if not session:
         raise HTTPException(404, "Sessão não encontrada.")
@@ -1158,9 +1275,136 @@ def create_manual_event(body: ManualEventBody):
             logging.getLogger(__name__).warning("Não foi possível guardar o frame do evento manual: %s", exc)
     try:
         return store.add_manual_event(body.session_id, text_value, body.start_time, body.end_time,
-                                      body.character, assets, frame_id)
+                                      character, assets, frame_id,
+                                      ocr_observation=body.ocr_observation)
     except KeyError as exc:
         raise HTTPException(404, "Sessão não encontrada.") from exc
+
+
+@app.post("/api/sessions/{session_id}/ocr-at-time")
+def recognize_manual_dialogue_at_time(session_id: str, body: EventAtTime):
+    session = store.session(session_id)
+    if not session:
+        raise HTTPException(404, "Sessão não encontrada neste projeto.")
+    start = float(session["source_start"])
+    duration = float(session["requested_duration"])
+    end = start + duration if duration > 0 else float("inf")
+    if body.at_time < start or body.at_time >= end:
+        raise HTTPException(400, "O horário do OCR precisa estar dentro do bloco selecionado.")
+    config = session.get("config_json") or {}
+    configured_regions = config.get("regions") or []
+    active_regions = []
+    for index, item in enumerate(configured_regions):
+        if not item.get("enabled", True):
+            continue
+        region = Region.from_dict(item, index, start)
+        if region.active_at(body.at_time):
+            active_regions.append((item, region))
+    if not active_regions:
+        raise HTTPException(400, "Não há ROI de legenda ativa neste horário. Ative ou ajuste uma ROI na Captura.")
+    source = None
+    try:
+        source = _event_source(session, session_id)
+        packet = source.frame_near(body.at_time)
+        if packet is None:
+            raise ValueError("Não foi possível ler o frame no horário do playhead.")
+        settings = load_settings()
+        ocr_engine = OcrEngine(session["language"], settings)
+        candidates = []
+        for item, region in active_regions:
+            x0, y0, x1, y1 = region.bounds(packet.image, packet.source_time)
+            if x1 <= x0 or y1 <= y0:
+                continue
+            lines = ocr_engine.recognize(packet.image[y0:y1, x0:x1])
+            raw = " ".join(line.text for line in lines).strip()
+            if not raw:
+                continue
+            processed = (strip_trailing_hud_artifacts(raw) if
+                         settings.get("ocr", {}).get("strip_trailing_hud_artifacts") else raw)
+            processed = apply_text_replacements(
+                processed, store.project_text_replacements(session.get("project_id"))
+            )
+            confidence = sum(line.confidence for line in lines) / len(lines) if lines else 0.0
+            useful_characters = sum(character.isalnum() for character in processed)
+            candidates.append({
+                "raw_text": raw,
+                "processed_text": processed or raw,
+                "confidence": confidence,
+                "source_time": packet.source_time,
+                "frame_id": packet.frame_id,
+                "timing_quality": packet.timing_quality,
+                "timing_error_ms": packet.timing_error_ms,
+                "bbox": [x0, y0, x1 - x0, y1 - y0],
+                "region_id": region.roi_id or item.get("roi_id"),
+                "region_name": region.name,
+                "useful_characters": useful_characters,
+                "_region": region,
+            })
+        if not candidates:
+            speaker_area = next(((item, region) for item, region in active_regions
+                                 if region.speaker_enabled and region.speaker_region), None)
+            if not speaker_area:
+                raise ValueError("O OCR não encontrou texto nas ROIs ativas neste frame. Ajuste o início da fala e tente novamente.")
+            item, region = speaker_area
+            x0, y0, x1, y1 = region.bounds(packet.image, packet.source_time)
+            if x1 <= x0 or y1 <= y0:
+                raise ValueError("A ROI ativa está fora do frame neste horário.")
+            candidates.append({
+                "raw_text": "", "processed_text": "", "confidence": 0.0,
+                "source_time": packet.source_time, "frame_id": packet.frame_id,
+                "timing_quality": packet.timing_quality,
+                "timing_error_ms": packet.timing_error_ms,
+                "bbox": [x0, y0, x1 - x0, y1 - y0],
+                "region_id": region.roi_id or item.get("roi_id"),
+                "region_name": region.name, "useful_characters": 0,
+                "_region": region,
+            })
+        best = max(candidates, key=lambda item: (item["useful_characters"], item["confidence"]))
+        best.pop("useful_characters", None)
+        region = best.pop("_region", None)
+        speaker_result = {"text": "", "confidence": 0.0, "candidate": None,
+                          "profile_id": None, "bbox": None,
+                          "configured": bool(region and region.speaker_enabled and region.speaker_region)}
+        if speaker_result["configured"]:
+            speaker_bounds = region.speaker_bounds(packet.image, packet.source_time)
+            if speaker_bounds:
+                sx0, sy0, sx1, sy1 = speaker_bounds
+                if sx1 > sx0 and sy1 > sy0:
+                    speaker_crop = packet.image[sy0:sy1, sx0:sx1]
+                    try:
+                        speaker_lines = ocr_engine.recognize(speaker_crop)
+                    except Exception as exc:
+                        logging.getLogger(__name__).warning(
+                            "Falha no OCR do personagem em diálogo manual: %s", type(exc).__name__)
+                        speaker_lines = []
+                    speaker_raw = " ".join(line.text for line in speaker_lines).strip()
+                    speaker_confidence = (sum(line.confidence for line in speaker_lines) /
+                                          len(speaker_lines)) if speaker_lines else 0.0
+                    speaker_result.update({"text": speaker_raw,
+                                           "confidence": speaker_confidence,
+                                           "bbox": [sx0, sy0, sx1 - sx0, sy1 - sy0]})
+                    region_id = best.get("region_id")
+                    if speaker_raw and speaker_confidence >= .45:
+                        from rapidfuzz.fuzz import ratio, token_set_ratio
+                        normalized_speaker = normalize_text(speaker_raw)
+                        profiles = store.roi_characters(region_id) if region_id else []
+                        matched = next((item for item in profiles
+                                        if max(ratio(normalized_speaker, normalize_text(item["name"])),
+                                               token_set_ratio(normalized_speaker, normalize_text(item["name"])),
+                                               ratio(normalized_speaker, normalize_text(item.get("alias") or "")),
+                                               token_set_ratio(normalized_speaker, normalize_text(item.get("alias") or ""))) >= 82), None)
+                        speaker_result["candidate"] = ((matched.get("alias") or matched["name"])
+                                                        if matched else speaker_raw)[:120]
+                        speaker_result["profile_id"] = matched.get("character_id") if matched else None
+                        speaker_result["matched"] = bool(matched)
+
+        best["speaker"] = speaker_result
+        return best
+    except (KeyError, OSError, RuntimeError, ValueError) as exc:
+        raise HTTPException(400, str(exc)) from exc
+    finally:
+        if source:
+            source.close()
 
 
 @app.get("/api/events/{event_id}")
@@ -1238,7 +1482,8 @@ def retry_event_ocr(event_id: str, body: EventAtTime):
         if x1 <= x0 or y1 <= y0:
             raise ValueError("A caixa do diálogo não está dentro do frame.")
         settings = load_settings()
-        lines = OcrEngine(session["language"], settings).recognize(packet.image[y0:y1, x0:x1])
+        ocr_engine = OcrEngine(session["language"], settings)
+        lines = ocr_engine.recognize(packet.image[y0:y1, x0:x1])
         raw = " ".join(line.text for line in lines).strip()
         processed = (strip_trailing_hud_artifacts(raw) if
                      settings.get("ocr", {}).get("strip_trailing_hud_artifacts") else raw)
@@ -1264,17 +1509,63 @@ def retry_event_ocr(event_id: str, body: EventAtTime):
             "image_role": "ocr_retry_crop",
         }, _write_original_asset(image_dir, token, "ocr_retry_frame", packet,
                                  event["start_time"])]
+        speaker_result = {"text": "", "confidence": 0.0, "candidate": None,
+                          "profile_id": None, "bbox": None, "configured": False}
+        if region_data and region.speaker_enabled and region.speaker_region:
+            speaker_result["configured"] = True
+            speaker_bounds = region.speaker_bounds(packet.image, packet.source_time)
+            if speaker_bounds:
+                sx0, sy0, sx1, sy1 = speaker_bounds
+                if sx1 > sx0 and sy1 > sy0:
+                    speaker_crop = packet.image[sy0:sy1, sx0:sx1]
+                    try:
+                        speaker_lines = ocr_engine.recognize(speaker_crop)
+                    except Exception as exc:
+                        speaker_result["error"] = type(exc).__name__
+                        speaker_lines = []
+                    speaker_raw = " ".join(line.text for line in speaker_lines).strip()
+                    speaker_confidence = (sum(line.confidence for line in speaker_lines) /
+                                          len(speaker_lines)) if speaker_lines else 0.0
+                    speaker_result.update({"text": speaker_raw,
+                                           "confidence": speaker_confidence,
+                                           "bbox": [sx0, sy0, sx1 - sx0, sy1 - sy0]})
+                    speaker_path = image_dir / f"{token}_speaker_crop.png"
+                    if not cv2.imwrite(str(speaker_path), speaker_crop,
+                                       [cv2.IMWRITE_PNG_COMPRESSION, 2]):
+                        raise RuntimeError("Falha ao salvar o recorte OCR do personagem.")
+                    image_assets.append({"kind": "ocr_retry_speaker_crop",
+                                         "path": speaker_path.relative_to(session_root).as_posix(),
+                                         "source_time": packet.source_time,
+                                         "frame_id": packet.frame_id,
+                                         "timing_quality": packet.timing_quality,
+                                         "timing_error_ms": packet.timing_error_ms,
+                                         "image_role": "ocr_retry_speaker_crop"})
+                    if speaker_raw and speaker_confidence >= .45 and region.roi_id:
+                        from rapidfuzz.fuzz import ratio, token_set_ratio
+                        normalized_speaker = normalize_text(speaker_raw)
+                        profiles = store.roi_characters(region.roi_id)
+                        matched = next((item for item in profiles
+                                        if max(ratio(normalized_speaker, normalize_text(item["name"])),
+                                               token_set_ratio(normalized_speaker, normalize_text(item["name"])),
+                                               ratio(normalized_speaker, normalize_text(item.get("alias") or "")),
+                                               token_set_ratio(normalized_speaker, normalize_text(item.get("alias") or ""))) >= 82), None)
+                        speaker_result["candidate"] = ((matched.get("alias") or matched["name"])
+                                                        if matched else speaker_raw)[:120]
+                        speaker_result["profile_id"] = matched.get("character_id") if matched else None
+                        speaker_result["matched"] = bool(matched)
         observation = {"source": "manual_retry", "source_time": packet.source_time,
                        "text": raw, "processed_text": processed, "confidence": confidence,
                        "frame_id": packet.frame_id, "timing_quality": packet.timing_quality,
                        "bbox": [x0, y0, x1 - x0, y1 - y0],
                        "image_assets": image_assets,
+                       "speaker": speaker_result,
                        "lines": [{"text": line.text, "confidence": line.confidence,
                                   "bbox": line.bbox} for line in lines]}
         store.add_ocr_retry(event_id, observation)
         return {"original_text": raw, "processed_text": processed, "confidence": confidence,
                 "source_time": packet.source_time, "frame_id": packet.frame_id,
                 "image_assets": image_assets, "lines": observation["lines"],
+                "speaker": speaker_result,
                 "applied": False}
     except (KeyError, OSError, RuntimeError, ValueError) as exc:
         raise HTTPException(400, str(exc)) from exc

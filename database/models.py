@@ -298,6 +298,7 @@ class VoiceProfile(Base):
     preview_text: Mapped[str] = mapped_column(Text, default="", nullable=False)
     default_speed: Mapped[float] = mapped_column(Float, default=1.0, nullable=False)
     default_instruct: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    default_direction: Mapped[str] = mapped_column(Text, default="", nullable=False)
     generation_settings_json: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
     use_authorized: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
@@ -322,6 +323,28 @@ class VoiceReferenceAsset(Base):
     quality_status: Mapped[str] = mapped_column(String(24), default="needs_review", nullable=False)
     sha256: Mapped[str] = mapped_column(String(64), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class VoiceDesignCandidate(Base):
+    __tablename__ = "voice_design_candidates"
+    candidate_id: Mapped[str] = mapped_column(String(48), primary_key=True)
+    voice_profile_id: Mapped[str] = mapped_column(ForeignKey("voice_profiles.voice_profile_id"), index=True, nullable=False)
+    batch_id: Mapped[str] = mapped_column(String(48), index=True, nullable=False)
+    candidate_index: Mapped[int] = mapped_column(Integer, nullable=False)
+    status: Mapped[str] = mapped_column(String(24), default="queued", index=True, nullable=False)
+    text_used: Mapped[str] = mapped_column(Text, nullable=False)
+    instruct_used: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    speed_used: Mapped[float] = mapped_column(Float, default=1.0, nullable=False)
+    generation_settings_json: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
+    take_id: Mapped[str | None] = mapped_column(String(48), nullable=True)
+    provider_job_id: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    audio_path: Mapped[str | None] = mapped_column(Text, nullable=True)
+    duration_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    __table_args__ = (UniqueConstraint("batch_id", "candidate_index", name="uq_voice_candidate_batch_index"),)
 
 
 class DubbingScene(Base):

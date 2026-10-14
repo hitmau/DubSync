@@ -4,13 +4,17 @@
   const $ = (selector) => document.querySelector(selector);
   const state = {
     overview: null, lines: [], playbackLines: [], playbackLinesSessionId: "", characters: [], selectedLine: null, selectedCharacterId: "",
+    lineSort: { key: "start", direction: "asc" },
     blockPlan: null, blockPlanSessionId: "", blockPlanCharacterId: "", blockPlanRootId: "", videoBatchId: "", videoBatchRootId: "",
     selectedTakeId: "", selectedSessionId: "", provider: null, queue: null, poll: 0,
-    loaded: false, loading: false, referenceUploadUrl: "", profilePreviewUrl: "", profilePreviewProfileId: "", profilePresetKey: "", editingProfileId: "",
+    loaded: false, loading: false, refreshRequested: false, referenceUploadUrl: "", profilePreviewUrl: "", profilePreviewProfileId: "", profilePresetKey: "", editingProfileId: "",
     roiSyncAttempted: new Set(), roiAudioRevision: 0, selectedOccurrenceIds: new Set(), timelineSelectedOccurrenceIds: new Set(), selectionBatchId: "",
+    voiceAssignmentOptionsDirty: false,
+    referenceRemoveRequested: false,
     selectionBatchOccurrenceIds: new Set(), selectionBatchStatuses: new Map(),
-    batchGeneratedOccurrenceIds: new Set(), designCandidates: [],
-    candidateGenerating: false, pendingBatch: null,
+    batchGeneratedOccurrenceIds: new Set(), designCandidates: [], designCandidateNodes: new Map(), candidateCache: new Map(),
+    candidateProfileId: "", candidateLoadedProfileId: "", candidateItems: [], candidatePollTimer: 0, candidateRefreshInFlight: false,
+    designLegacyTokens: [], candidateGenerating: false, pendingBatch: null,
     timelinePlaybackToken: 0, timelinePreviousTime: null, autoPlaybackOccurrenceId: "",
     autoPlaybackPendingId: "", autoPlaybackTakeId: "", autoPlaybackWarned: false,
     actionCharacterId: "",
@@ -19,16 +23,30 @@
   let lineAutosaveQueue = Promise.resolve(true);
   let lineEditRevision = 0;
   let lineDirty = false;
+  let profileDraftDirty = false;
+  let dubbingPollGeneration = 0;
+  let lineTableAudio = null;
+  let lineTablePlayingTakeId = "";
+  const waveformCache = new Map();
+  const waveformPending = new Map();
+  const lineRowByOccurrence = new Map();
+  const timelinePinByOccurrence = new Map();
+  let waveformRenderRevision = 0;
   const DUB_TIMELINE_VIEW_KEY = "dubsync.dub.timelineViews.v1";
+  let pendingSharedNavigation = null;
   let dubTimelineViews = {};
   let dubTimelineRange = { start: 0, end: 1, span: 1 };
   let dubTimelineMarquee = null, dubTimelinePinDrag = null, dubTimelineIgnoreClick = false, dubTimelineAnchor = "";
   try { dubTimelineViews = JSON.parse(localStorage.getItem(DUB_TIMELINE_VIEW_KEY) || "{}"); } catch { dubTimelineViews = {}; }
   const statusNames = {
     accepted: "aprovada", corrected: "corrigida", pending: "pendente", discarded: "descartada",
-    queued: "na fila", generating: "gerando", review: "revisão", approved: "aprovado",
-    rejected: "rejeitado", error: "erro", cancelled: "cancelado", generated: "gerado",
+    queued: "na fila", generating: "gerando", review: "sincronizando", approved: "pronta no jogo",
+    rejected: "rejeitado", error: "erro", cancelled: "cancelado", generated: "sincronizando",
+    publishing: "sincronizando com o jogo", publish_error: "falha ao enviar ao jogo",
+    ready: "pronta no jogo", superseded: "substituída",
   };
+  // OmniVoice 0.2.1 rejects free-form rhythm/texture/direction tokens in voice design.
+  const DESIGN_PROMPT_CHOICES = [];
 
   function toast(message, bad = false) {
     const node = $("#toast");
@@ -59,8 +77,8 @@
     return result;
   }
 
-  async function requestCapture(path) {
-    const response = await fetch(path);
+  async function requestCapture(path, options = {}) {
+    const response = await fetch(path, options);
     const text = await response.text();
     let result = null;
     try { result = text ? JSON.parse(text) : {}; } catch { result = { message: text }; }
@@ -71,12 +89,102 @@
     return result;
   }
 
+  async function loadDubbingRuntimeVolume() {
+    const slider = $("#dubRuntimeVolume");
+    if (!slider) return;
+    slider.disabled = true;
+    try {
+      const result = await requestCapture("/api/integration/profile");
+      const profile = result.profile;
+      if (!profile) throw new Error("Configure o perfil do jogo na Integração para controlar o volume.");
+      const volumePercent = Math.max(0, Math.min(3162.27766, Number(profile.audio_profile_json?.volume_percent ?? 100)));
+      const db = volumePercent <= 0 ? -60 : Math.max(-59.9, Math.min(30, 20 * Math.log10(volumePercent / 100)));
+      slider.value = String(Math.round(db));
+      renderDubbingRuntimeVolume();
+      slider.disabled = false;
+    } catch (error) {
+      setDubbingRuntimeVolumeStatus(error.message);
+    }
+  }
+
+  function setDubbingRuntimeVolumeStatus(message) {
+    const status = $("#dubRuntimeVolumeStatus");
+    const value = $("#dubRuntimeVolumeValue");
+    if (status) status.textContent = message;
+    if (value) value.title = message;
+  }
+
+  function renderDubbingRuntimeVolume() {
+    const slider = $("#dubRuntimeVolume");
+    if (!slider) return;
+    const db = Number(slider.value);
+    $("#dubRuntimeVolumeValue").textContent = db <= -60 ? "Mudo" : `${db > 0 ? "+" : ""}${db.toFixed(1).replace(/\.0$/, "")} dB`;
+  }
+
+  async function saveDubbingRuntimeVolume() {
+    const slider = $("#dubRuntimeVolume");
+    if (!slider || slider.disabled) return;
+    const db = Number(slider.value);
+    const volume = db <= -60 ? 0 : Number((100 * 10 ** (db / 20)).toFixed(6));
+    const label = db <= -60 ? "mudo" : `${db > 0 ? "+" : ""}${db.toFixed(1).replace(/\.0$/, "")} dB`;
+    slider.disabled = true;
+    setDubbingRuntimeVolumeStatus("Salvando volume das dublagens…");
+    try {
+      const result = await requestCapture("/api/integration/profile/volume", {
+        method: "PUT", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ volume_percent: volume }),
+      });
+      const applied = result.volume_runtime_status === "applied";
+      setDubbingRuntimeVolumeStatus(applied
+        ? `Ganho ${label} salvo; será aplicado às próximas falas sem regravar os áudios.`
+        : `Ganho ${label} salvo no perfil. O runtime do jogo ainda não aplicou a mudança (${result.volume_runtime_status}).`);
+    } catch (error) {
+      setDubbingRuntimeVolumeStatus(error.message);
+      toast(`Não foi possível salvar o volume: ${error.message}`, true);
+    } finally {
+      slider.disabled = false;
+    }
+  }
+
+  function initializeDubbingRuntimeVolume() {
+    const slider = $("#dubRuntimeVolume");
+    if (!slider) return;
+    slider.addEventListener("input", () => {
+      renderDubbingRuntimeVolume();
+    });
+    slider.addEventListener("change", () => void saveDubbingRuntimeVolume());
+    void loadDubbingRuntimeVolume();
+  }
+
   function setLineSaveStatus(message, status = "saved", detail = "") {
     const node = $("#dubLineSaveStatus");
     if (!node) return;
     node.textContent = message;
     node.className = `dub-autosave-status ${status}`;
     node.title = detail;
+  }
+
+  function updateProfileSaveState() {
+    const button = $("#dubSaveProfile"), status = $("#dubProfileSaveStatus");
+    if (!button) return;
+    const owner = state.characters.find((item) => item.character_id === $("#dubVoiceCharacterId").value);
+    const canSave = Boolean($("#dubProfileName").value.trim() && $("#dubVoiceCharacterId").value && owner?.name_verified);
+    if (!button.classList.contains("saving")) button.disabled = !canSave;
+    if (status && !button.classList.contains("saved")) {
+      status.textContent = profileDraftDirty ? "Alterações pendentes. Clique em Salvar perfil para gravá-las." : "Alterações do perfil só são gravadas ao salvar.";
+      status.className = profileDraftDirty ? "pending" : "";
+    }
+    button.title = owner?.name_verified ? "Salva no perfil selecionado os ajustes das seções 2 e 3." : "Confira a identidade do personagem antes de salvar o perfil vocal.";
+  }
+
+  function markProfileDraftDirty() {
+    profileDraftDirty = true;
+    updateProfileSaveState();
+  }
+
+  function confirmDiscardProfileDraft() {
+    if (!profileDraftDirty) return true;
+    return confirm("Há alterações do perfil vocal ainda não salvas. Descartar essas alterações?");
   }
 
   function scheduleLineAutosave(delay = 450) {
@@ -120,6 +228,15 @@
     const value = Math.max(0, Math.floor(Number(seconds)));
     return `${String(Math.floor(value / 60)).padStart(2, "0")}:${String(value % 60).padStart(2, "0")}`;
   }
+  function fmtSourceTime(seconds) {
+    if (seconds == null || !Number.isFinite(Number(seconds))) return "—";
+    const milliseconds = Math.round(Math.max(0, Number(seconds)) * 1000);
+    const hours = Math.floor(milliseconds / 3600000);
+    const minutes = Math.floor(milliseconds / 60000) % 60;
+    const wholeSeconds = Math.floor(milliseconds / 1000) % 60;
+    const fraction = milliseconds % 1000;
+    return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}:${String(wholeSeconds).padStart(2, "0")}.${String(fraction).padStart(3, "0")}`;
+  }
   function fmtClock(seconds) {
     if (seconds == null || !Number.isFinite(Number(seconds))) return "—";
     const value = Math.max(0, Math.floor(Number(seconds))), hours = Math.floor(value / 3600);
@@ -142,6 +259,148 @@
   function selectedCharacter() { return state.characters.find((item) => item.character_id === state.selectedCharacterId); }
   function allProfiles() { return state.characters.flatMap((character) => (character.voice_profiles || []).map((profile) => ({ ...profile, owner_name: character.display_name || character.name }))); }
   function findProfile(profileId) { return allProfiles().find((profile) => profile.voice_profile_id === profileId) || null; }
+  function characterVoiceStatus(character) {
+    return (character.voice_profiles || []).some((profile) => profile.ready) ? "ready"
+      : !character.name_verified ? "needs_review" : "no_voice";
+  }
+  function fillCharacterVoiceProfileSelect(select, character, activeProfiles = allProfiles().filter((profile) => profile.active)) {
+    const selectedId = character.default_voice_profile_id || "";
+    select.replaceChildren(make("option", "", "Sem perfil"));
+    for (const profile of activeProfiles) {
+      const option = make("option", "", `${profile.name} · ${profile.owner_name}`);
+      option.value = profile.voice_profile_id;
+      select.append(option);
+    }
+    select.value = selectedId;
+    select.disabled = !character.name_verified;
+    if (!character.name_verified) select.title = "Confira a identidade do personagem antes de associar uma voz.";
+    else select.removeAttribute("title");
+  }
+  function refreshCharacterVoiceProfileControls(characterId = "") {
+    const activeProfiles = allProfiles().filter((profile) => profile.active);
+    for (const row of document.querySelectorAll(".dub-character-card[data-character-id]")) {
+      if (characterId && row.dataset.characterId !== characterId) continue;
+      const character = state.characters.find((item) => item.character_id === row.dataset.characterId);
+      if (!character) continue;
+      const status = row.querySelector(".dub-character-state");
+      if (status) {
+        character.voice_status = characterVoiceStatus(character);
+        status.className = `dub-character-state ${character.voice_status}`;
+        status.textContent = character.voice_status === "ready" ? "READY"
+          : character.voice_status === "needs_review" ? "REVISAR" : "SEM VOZ";
+      }
+      const note = row.querySelector(".dub-character-info small");
+      if (note) note.textContent = `${(character.voice_profiles || []).length} perfil(is) · ${character.name_verified ? "nome conferido" : "conferir nome"}`;
+      const select = row.querySelector(".dub-character-voice-select");
+      if (select) fillCharacterVoiceProfileSelect(select, character, activeProfiles);
+    }
+  }
+  function refreshCharacterVoiceStatus(character) {
+    if (!character) return;
+    character.voice_status = characterVoiceStatus(character);
+    const row = [...document.querySelectorAll(".dub-character-card[data-character-id]")]
+      .find((item) => item.dataset.characterId === character.character_id);
+    if (!row) return;
+    const status = row.querySelector(".dub-character-state");
+    if (status) {
+      status.className = `dub-character-state ${character.voice_status}`;
+      status.textContent = character.voice_status === "ready" ? "READY"
+        : character.voice_status === "needs_review" ? "REVISAR" : "SEM VOZ";
+    }
+    const note = row.querySelector(".dub-character-info small");
+    if (note) note.textContent = `${(character.voice_profiles || []).length} perfil(is) · ${character.name_verified ? "nome conferido" : "conferir nome"}`;
+  }
+  function refreshStoredVoiceProfileControls(character) {
+    if (state.voiceAssignmentOptionsDirty) {
+      refreshCharacterVoiceProfileControls();
+      state.voiceAssignmentOptionsDirty = false;
+    } else refreshCharacterVoiceStatus(character);
+  }
+  function storeVoiceProfile(profile, { refreshViews = true } = {}) {
+    const character = state.characters.find((item) => item.character_id === profile?.character_id);
+    if (!character || !profile?.voice_profile_id) return null;
+    character.voice_profiles ||= [];
+    const index = character.voice_profiles.findIndex((item) => item.voice_profile_id === profile.voice_profile_id);
+    const previous = index >= 0 ? character.voice_profiles[index] : null;
+    const saved = { ...(previous || {}), ...profile };
+    if (!previous || previous.name !== saved.name || previous.active !== saved.active) state.voiceAssignmentOptionsDirty = true;
+    if (index >= 0) character.voice_profiles[index] = saved;
+    else character.voice_profiles.push(saved);
+    character.voice_profiles.sort((a, b) => String(b.updated_at || "").localeCompare(String(a.updated_at || "")));
+    character.voice_status = characterVoiceStatus(character);
+    const boundCharacters = new Set([character.character_id]);
+    for (const line of state.lines) if (line.voice_profile_id === saved.voice_profile_id) boundCharacters.add(line.character_id);
+    for (const line of state.playbackLines) if (line.voice_profile_id === saved.voice_profile_id) boundCharacters.add(line.character_id);
+    for (const owner of state.characters) {
+      const profileIsDefault = owner.default_voice_profile_id === saved.voice_profile_id;
+      const isImplicitDefault = owner.character_id === character.character_id && !owner.default_voice_profile_id;
+      if (profileIsDefault || boundCharacters.has(owner.character_id) || isImplicitDefault) {
+        applyCharacterVoiceAssignment(owner, owner.default_voice_profile_id);
+      }
+    }
+    if (refreshViews) {
+      refreshStoredVoiceProfileControls(character);
+      if (character.character_id === state.selectedCharacterId) renderCharacterDetail(character);
+    }
+    return saved;
+  }
+  function storeCharacter(character) {
+    if (!character?.character_id) return null;
+    const index = state.characters.findIndex((item) => item.character_id === character.character_id);
+    if (index < 0) return null;
+    Object.assign(state.characters[index], character);
+    const current = state.characters[index];
+    current.voice_status ||= characterVoiceStatus(current);
+    refreshCharacterVoiceProfileControls(current.character_id);
+    if (current.character_id === state.selectedCharacterId) renderCharacterDetail(current);
+    return current;
+  }
+  function removeVoiceProfileFromState(profileId, deactivated = false) {
+    const profile = findProfile(profileId);
+    if (!profile) return null;
+    const character = state.characters.find((item) => item.character_id === profile.character_id);
+    if (!character) return null;
+    if (deactivated) {
+      const stored = character.voice_profiles.find((item) => item.voice_profile_id === profileId);
+      if (stored) { stored.active = false; stored.status = "inactive"; }
+    } else {
+      character.voice_profiles = character.voice_profiles.filter((item) => item.voice_profile_id !== profileId);
+      for (const owner of state.characters) {
+        if (owner.default_voice_profile_id === profileId) owner.default_voice_profile_id = null;
+      }
+    }
+    character.voice_status = characterVoiceStatus(character);
+    state.voiceAssignmentOptionsDirty = true;
+    const syncLineProfile = (item) => {
+      if (item.voice_profile_id !== profileId) return;
+      const owner = state.characters.find((entry) => entry.character_id === item.character_id);
+      const fallback = (owner?.voice_profiles || []).find((entry) => entry.voice_profile_id === owner.default_voice_profile_id && entry.active)
+        || (owner?.voice_profiles || []).find((entry) => entry.active) || null;
+      item.voice_profile_id = fallback?.voice_profile_id || null;
+      item.voice_profile_name = fallback?.name || null;
+      item.voice_ready = Boolean(fallback?.ready);
+    };
+    state.lines.forEach(syncLineProfile); state.playbackLines.forEach(syncLineProfile); syncLineProfile(state.selectedLine || {});
+    refreshStoredVoiceProfileControls(character);
+    if (character.character_id === state.selectedCharacterId) renderCharacterDetail(character);
+    return character;
+  }
+  function applyCharacterVoiceAssignment(character, voiceProfileId) {
+    const selected = voiceProfileId ? findProfile(voiceProfileId) : null;
+    const profile = (selected?.active ? selected : null)
+      || (character.voice_profiles || []).find((item) => item.active)
+      || null;
+    const updateLine = (item) => {
+      if (item.character_id !== character.character_id) return;
+      item.voice_profile_id = profile?.voice_profile_id || null;
+      item.voice_profile_name = profile?.name || null;
+      item.voice_ready = Boolean(profile?.ready);
+    };
+    state.lines.forEach(updateLine);
+    state.playbackLines.forEach(updateLine);
+    if (state.selectedLine?.character_id === character.character_id) updateLine(state.selectedLine);
+    return profile;
+  }
   function hasRoiAudio(character) { return Boolean(character && (character.sample_audio_available ?? character.sample_mp3_available)); }
   function roiAudioName(character) { return character?.sample_audio_name || character?.sample_mp3_name || "áudio anexado no personagem"; }
   function profileReferenceName(profile) {
@@ -175,12 +434,14 @@
     const status = $("#dubProfileReferenceStatus");
     if (status) status.replaceChildren(make("span", "", `Preparando automaticamente ${roiAudioName(character)}…`));
     try {
-      await request(`/voice-profiles/${encodeURIComponent(profileId)}/sync-roi-audio`, { method: "POST" });
+      const synced = await request(`/voice-profiles/${encodeURIComponent(profileId)}/sync-roi-audio`, { method: "POST" });
       const keepEditor = state.editingProfileId === profileId && $("#dubVoiceCharacterId").value === character.character_id;
-      await loadAll();
-      if (!keepEditor || state.editingProfileId !== profileId) return true;
-      const latest = findProfile(profileId);
-      if (latest) { renderProfileOptions(profileId); renderProfileEditor(latest, character); }
+      const latest = storeVoiceProfile(synced, { refreshViews: false }) || findProfile(profileId);
+      if (!keepEditor || state.editingProfileId !== profileId) {
+        refreshVoiceProfileStatus(profileId);
+        return true;
+      }
+      if (latest) refreshVoiceProfileStatus(profileId, { updateModeControls: true });
       return true;
     } catch (error) {
       if (state.editingProfileId === profileId && status) status.replaceChildren(make("span", "", `Não foi possível preparar ${roiAudioName(character)}: ${error.message}`));
@@ -224,20 +485,73 @@
     $("#dubFadeDuration").value = settings.fade_duration ?? 0.1;
     $("#dubAudioChunkDuration").value = settings.audio_chunk_duration ?? 15;
     $("#dubAudioChunkThreshold").value = settings.audio_chunk_threshold ?? 30;
+    $("#dubVoiceEffect").value = ["none", "raspy", "robotic"].includes(settings.voice_effect)
+      ? settings.voice_effect : "none";
   }
   function voiceDesignInstruction() {
     const values = [$("#dubDesignGender").value, $("#dubDesignAge").value,
       $("#dubDesignPitch").value, $("#dubDesignStyle").value];
-    const rhythm = $("#dubDesignRhythm").value.trim();
-    const texture = $("#dubDesignTexture").value.trim();
-    const description = $("#dubDesignDescription").value.trim();
-    if (rhythm) values.push(`Ritmo: ${rhythm}`);
-    if (texture) values.push(`Textura: ${texture}`);
-    if (description) values.push(description);
     return values.filter(Boolean).join(", ");
   }
+  function updateDesignPromptOptions() {
+    const selects = [...$("#dubDesignExtraOptions").querySelectorAll("select")];
+    const selectedValues = new Set(selects.map((select) => select.value).filter(Boolean));
+    for (const select of selects) {
+      for (const option of select.options) {
+        option.disabled = Boolean(option.value && option.value !== select.value && selectedValues.has(option.value));
+      }
+    }
+    $("#dubDesignAddOption").disabled = selects.length >= DESIGN_PROMPT_CHOICES.length;
+  }
+  function addDesignPromptField(value = "") {
+    const container = $("#dubDesignExtraOptions");
+    const row = make("div", "dub-design-extra-row");
+    const select = document.createElement("select");
+    select.setAttribute("aria-label", "Complemento experimental de voz");
+    const placeholder = make("option", "", "Escolha um complemento…");
+    placeholder.value = ""; select.append(placeholder);
+    let group = "";
+    let groupNode = null;
+    for (const choice of DESIGN_PROMPT_CHOICES) {
+      if (choice.group !== group) {
+        group = choice.group;
+        groupNode = document.createElement("optgroup"); groupNode.label = group; select.append(groupNode);
+      }
+      const option = make("option", "", choice.label); option.value = choice.value; groupNode.append(option);
+    }
+    select.value = value;
+    const remove = make("button", "button quiet dub-design-remove-option", "−");
+    remove.type = "button"; remove.setAttribute("aria-label", "Remover este complemento"); remove.title = "Remover complemento";
+    remove.addEventListener("click", () => {
+      row.remove(); updateDesignPromptOptions(); state.profilePresetKey = "";
+      updateProfileModeControls();
+      markProfileDraftDirty();
+    });
+    select.addEventListener("change", () => {
+      updateDesignPromptOptions(); state.profilePresetKey = ""; clearDesignCandidates(); updateProfileModeControls();
+    });
+    row.append(select, remove); container.append(row); updateDesignPromptOptions();
+    return select;
+  }
+  function renderLegacyDesignTokens() {
+    const container = $("#dubDesignLegacy"); container.replaceChildren();
+    if (!state.designLegacyTokens.length) { container.classList.add("hidden"); return; }
+    container.classList.remove("hidden");
+    container.append(make("small", "", "Atributos antigos sem suporte encontrados. Eles não serão enviados ao OmniVoice; salve o perfil para limpar a instrução:"));
+    state.designLegacyTokens.forEach((token, index) => {
+      const chip = make("span", "dub-design-legacy-chip", token);
+      const remove = make("button", "", "×"); remove.type = "button"; remove.title = "Remover instrução antiga";
+      remove.addEventListener("click", () => {
+        state.designLegacyTokens.splice(index, 1); renderLegacyDesignTokens();
+        clearDesignCandidates(); updateProfileModeControls();
+        markProfileDraftDirty();
+      });
+      chip.append(remove); container.append(chip);
+    });
+  }
   function applyVoiceDesignInstruction(value = "") {
-    const tokens = String(value).toLowerCase().split(/[,，]/).map((token) => token.trim()).filter(Boolean);
+    const originalTokens = String(value).split(/[,，]/).map((token) => token.trim()).filter(Boolean);
+    const tokens = originalTokens.map((token) => token.toLowerCase());
     const optionsBySelector = [
       ["#dubDesignGender", ["male", "female"]],
       ["#dubDesignAge", ["child", "teenager", "young adult", "middle-aged", "elderly"]],
@@ -246,28 +560,93 @@
     ];
     const recognized = new Set(optionsBySelector.flatMap(([, options]) => options));
     for (const [selector, options] of optionsBySelector) $(selector).value = options.find((option) => tokens.includes(option)) || "";
-    const remaining = String(value).split(/[,，]/).map((token) => token.trim()).filter((token) => token && !recognized.has(token.toLowerCase()));
-    const rhythm = remaining.find((token) => /^ritmo\s*:/i.test(token)) || "";
-    const texture = remaining.find((token) => /^textura\s*:/i.test(token)) || "";
-    $("#dubDesignRhythm").value = rhythm.replace(/^ritmo\s*:/i, "").trim();
-    $("#dubDesignTexture").value = texture.replace(/^textura\s*:/i, "").trim();
-    $("#dubDesignDescription").value = remaining.filter((token) => token !== rhythm && token !== texture).join(", ");
+    const recognizedPrompts = new Set(DESIGN_PROMPT_CHOICES.map((choice) => choice.value));
+    $("#dubDesignExtraOptions").replaceChildren();
+    state.designLegacyTokens = originalTokens.filter((token) =>
+      !recognized.has(token.toLowerCase()) && !recognizedPrompts.has(token.toLowerCase()));
+    renderLegacyDesignTokens(); updateDesignPromptOptions();
   }
   function clearDesignCandidates() {
     for (const candidate of state.designCandidates) URL.revokeObjectURL(candidate.url);
     state.designCandidates = [];
-    $("#dubCandidateList").replaceChildren();
   }
-  function renderDesignCandidate(candidate) {
-    const card = make("article", "dub-candidate-card");
-    const heading = make("div", "dub-candidate-heading");
-    heading.append(make("b", "", `Variação ${candidate.index}`), make("small", "", "Prévia temporária · não é uma voz oficial"));
-    const audio = make("audio", "dub-candidate-audio"); audio.controls = true; audio.preload = "metadata"; audio.src = candidate.url;
-    const choose = make("button", "button quiet", "✓ Definir voz oficial"); choose.type = "button";
-    choose.disabled = state.candidateGenerating;
-    choose.addEventListener("click", () => void selectDesignCandidate(candidate, choose));
-    card.append(heading, audio, choose);
-    $("#dubCandidateList").append(card);
+  function renderDesignCandidates(items) {
+    const container = $("#dubCandidateList"), history = $("#dubCandidateHistory");
+    history.classList.toggle("hidden", !items.length);
+    const keep = new Set(items.map((candidate) => candidate.candidate_id));
+    for (const [candidateId, card] of state.designCandidateNodes) {
+      if (!keep.has(candidateId)) { card.remove(); state.designCandidateNodes.delete(candidateId); }
+    }
+    const profile = findProfile(state.candidateProfileId);
+    for (const candidate of [...items].reverse()) {
+      let card = state.designCandidateNodes.get(candidate.candidate_id);
+      if (!card) {
+        card = make("article", "dub-candidate-card");
+        const heading = make("div", "dub-candidate-heading");
+        const title = make("b", ""); const status = make("small", "dub-candidate-state");
+        const text = make("small", "dub-candidate-text");
+        const audio = make("audio", "dub-candidate-audio"); audio.controls = true; audio.preload = "metadata";
+        const error = make("small", "dub-candidate-error");
+        const choose = make("button", "button quiet", "✓ Definir voz oficial"); choose.type = "button";
+        choose.addEventListener("click", () => void selectDesignCandidate(candidate.candidate_id, choose));
+        heading.append(title, status); card.append(heading, text, audio, error, choose);
+        card._candidateNodes = { title, status, text, audio, error, choose };
+        state.designCandidateNodes.set(candidate.candidate_id, card); container.append(card);
+      }
+      const nodes = card._candidateNodes;
+      nodes.title.textContent = `Candidato ${candidate.candidate_index} · ${candidate.candidate_id.slice(-4)}`;
+      const statusNames = { queued: "Na fila", generating: "Gerando…", completed: "Áudio pronto", error: "Falha" };
+      nodes.status.textContent = statusNames[candidate.status] || candidate.status;
+      nodes.status.className = `dub-candidate-state ${candidate.status}`;
+      nodes.text.textContent = `Texto: ${candidate.text_used}`;
+      nodes.error.textContent = candidate.error_message || "";
+      nodes.audio.classList.toggle("hidden", candidate.status !== "completed");
+      if (candidate.status === "completed" && nodes.audio.dataset.candidateId !== candidate.candidate_id) {
+        const query = new URLSearchParams({ project_id: window.DUBSYNC_PROJECT_ID || "" });
+        nodes.audio.src = `/api/dubbing/voice-profiles/${encodeURIComponent(candidate.voice_profile_id)}/design-candidates/${encodeURIComponent(candidate.candidate_id)}/audio?${query}`;
+        nodes.audio.dataset.candidateId = candidate.candidate_id;
+      }
+      const isOfficial = profile?.provider_voice_key === "dubsync:design-candidate"
+        && profile?.reference?.source_uri_or_note?.includes(candidate.candidate_id);
+      nodes.choose.disabled = candidate.status !== "completed" || !profile || profile.voice_mode !== "design"
+        || !profile.active || !profile.use_authorized || state.candidateGenerating || isOfficial;
+      nodes.choose.textContent = isOfficial ? "✓ Voz oficial" : "✓ Definir voz oficial";
+      nodes.choose.title = isOfficial ? "Este candidato é a voz oficial ativa do perfil."
+        : nodes.choose.disabled && candidate.status === "completed"
+          ? "Volte ao modo Gerar voz para escolher este candidato." : "Usar este áudio como referência oficial do perfil.";
+    }
+  }
+  async function loadDesignCandidates(profileId = state.editingProfileId) {
+    if (!profileId) {
+      if (state.candidatePollTimer) clearInterval(state.candidatePollTimer);
+      state.candidatePollTimer = 0; state.candidateProfileId = ""; state.candidateLoadedProfileId = "";
+      state.candidateItems = []; state.designCandidateNodes.clear();
+      $("#dubCandidateList").replaceChildren(); $("#dubCandidateHistory").classList.add("hidden"); return;
+    }
+    state.candidateProfileId = profileId;
+    if (state.candidateRefreshInFlight) return;
+    state.candidateRefreshInFlight = true;
+    try {
+      const result = await request(`/voice-profiles/${encodeURIComponent(profileId)}/design-candidates?limit=200`);
+      const items = result.items || [];
+      state.candidateCache.set(profileId, items);
+      while (state.candidateCache.size > 12) state.candidateCache.delete(state.candidateCache.keys().next().value);
+      if (state.candidateProfileId !== profileId || state.editingProfileId !== profileId) return;
+      state.candidateItems = items;
+      state.candidateLoadedProfileId = profileId;
+      renderDesignCandidates(items);
+      const pending = items.some((candidate) => candidate.status === "queued" || candidate.status === "generating");
+      if (pending && !state.candidatePollTimer) {
+        state.candidatePollTimer = window.setInterval(() => void loadDesignCandidates(profileId), 1800);
+      } else if (!pending && state.candidatePollTimer) {
+        clearInterval(state.candidatePollTimer); state.candidatePollTimer = 0;
+      }
+    } catch (error) {
+      if (state.editingProfileId === profileId) console.warn("Candidatos do perfil:", error);
+    } finally {
+      state.candidateRefreshInFlight = false;
+      if (state.candidateProfileId && state.candidateProfileId !== profileId) void loadDesignCandidates(state.candidateProfileId);
+    }
   }
   async function generateDesignCandidates() {
     const profile = findProfile(state.editingProfileId);
@@ -277,69 +656,37 @@
       toast("Salve e autorize este perfil com os atributos atuais antes de gerar candidatos.", true); return;
     }
     if (!text) { toast("Digite uma frase de 3 a 10 segundos para comparar as vozes.", true); return; }
-    clearDesignCandidates();
+    const count = Math.max(1, Math.min(10, Math.trunc(Number($("#dubCandidateCount").value) || 3)));
+    $("#dubCandidateCount").value = count;
     state.candidateGenerating = true;
     const button = $("#dubGenerateCandidates");
     button.disabled = true; button.innerHTML = '<span class="dub-inline-spinner" aria-hidden="true"></span> Gerando variações…';
-    $("#dubCandidateList").append(make("p", "dub-candidate-progress", "O OmniVoice está criando três prévias locais. Cada variação pode levar alguns segundos."));
     try {
-      const variations = [
-        { class_temperature: 0.35, position_temperature: 3 },
-        { class_temperature: 0.75, position_temperature: 5 },
-        { class_temperature: 1.15, position_temperature: 7 },
-      ];
-      for (let index = 0; index < variations.length; index += 1) {
-        const settings = { ...generationSettings(), ...variations[index] };
-        try {
-          const response = await fetch(`/api/dubbing/voice-profiles/${encodeURIComponent(profile.voice_profile_id)}/preview`, {
-            method: "POST", headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ text, instruct: instruction, speed: Number($("#dubSpeed").value || 1), generation_settings: settings }),
-          });
-          if (!response.ok) {
-            const data = await response.json().catch(() => ({}));
-            throw new Error(data.detail?.message || data.detail || "Falha ao gerar esta variação.");
-          }
-          const blob = await response.blob();
-          const candidate = { index: index + 1, blob, url: URL.createObjectURL(blob), text };
-          if (state.editingProfileId !== profile.voice_profile_id || $("#dubLocalProfileMode").value !== "design"
-            || voiceDesignInstruction() !== instruction) {
-            URL.revokeObjectURL(candidate.url);
-            continue;
-          }
-          state.designCandidates.push(candidate);
-          if (index === 0) $("#dubCandidateList").replaceChildren();
-          renderDesignCandidate(candidate);
-        } catch (error) {
-          if (index === 0) $("#dubCandidateList").replaceChildren();
-          $("#dubCandidateList").append(make("p", "dub-candidate-error", `Variação ${index + 1}: ${error.message}`));
-        }
-      }
-      if (state.designCandidates.length) toast(`${state.designCandidates.length} prévia(s) pronta(s). Ouça e escolha a voz oficial.`);
-      else toast("Não foi possível gerar as prévias. Confira o OmniVoice e tente novamente.", true);
+      const batch = await request(`/voice-profiles/${encodeURIComponent(profile.voice_profile_id)}/design-candidates`, {
+        method: "POST", body: JSON.stringify({ text, instruct: instruction, count,
+          speed: Number($("#dubSpeed").value || 1), generation_settings: generationSettings() }),
+      });
+      toast(`${batch.count} candidato(s) enfileirado(s). A fila segue no servidor se você sair desta tela.`);
+    } catch (error) {
+      toast(error.message, true);
     } finally {
       state.candidateGenerating = false;
-      button.textContent = "✦ Gerar novas variações";
+      button.textContent = "✦ Gerar candidatos";
       updateProfileModeControls();
-      document.querySelectorAll(".dub-candidate-card .button").forEach((item) => { item.disabled = false; });
+      void loadDesignCandidates(profile.voice_profile_id);
     }
   }
   async function selectDesignCandidate(candidate, button) {
-    const profile = findProfile(state.editingProfileId);
+    const profileId = state.candidateProfileId;
+    const profile = findProfile(profileId);
     if (!profile) { toast("Salve o perfil antes de selecionar uma voz oficial.", true); return; }
     button.disabled = true; button.textContent = "Salvando voz…";
     try {
-      const params = new URLSearchParams({ reference_text: candidate.text });
-      const saved = await request(`/voice-profiles/${encodeURIComponent(profile.voice_profile_id)}/generated-reference?${params}`, {
-        method: "POST", body: candidate.blob, headers: { "Content-Type": "audio/wav" },
-      });
-      clearDesignCandidates();
+      const saved = await request(`/voice-profiles/${encodeURIComponent(profile.voice_profile_id)}/design-candidates/${encodeURIComponent(candidate)}/select`, { method: "POST" });
       state.selectedCharacterId = profile.character_id;
-      await loadAll();
-      const owner = state.characters.find((item) => item.character_id === profile.character_id);
-      const latest = findProfile(saved.profile.voice_profile_id) || saved.profile;
-      renderProfileOptions(latest.voice_profile_id); renderProfileEditor(latest, owner);
-      updateGenerateEnabled();
-      toast(`“${latest.name}” agora usa a voz oficial selecionada. Os próximos takes reutilizarão essa identidade.`);
+      const latest = storeVoiceProfile(saved.profile, { refreshViews: false }) || saved.profile;
+      refreshVoiceProfileStatus(latest.voice_profile_id, { refreshCandidates: true });
+      toast(`“${latest.name}” foi escolhida como voz oficial. O perfil Gerar voz está pronto para produzir os takes com os atributos salvos.`);
     } catch (error) {
       button.disabled = false; button.textContent = "✓ Definir voz oficial";
       toast(error.message, true);
@@ -412,9 +759,15 @@
     $("#dubPreprocessPrompt").disabled = design;
     $("#dubPreprocessPrompt").title = design ? "Só se aplica ao áudio de clonagem." : "Remove silêncios longos da amostra e prepara o texto de referência.";
     $("#dubClearVoiceModel").classList.toggle("hidden", !design || !state.profilePresetKey);
-    for (const selector of ["#dubDesignGender", "#dubDesignAge", "#dubDesignPitch", "#dubDesignStyle", "#dubDesignRhythm", "#dubDesignTexture", "#dubDesignDescription"]) {
+    for (const selector of ["#dubDesignGender", "#dubDesignAge", "#dubDesignPitch", "#dubDesignStyle"]) {
       $(selector).disabled = !design || Boolean(state.profilePresetKey);
     }
+    $("#dubDesignAddOption").disabled = !design || Boolean(state.profilePresetKey)
+      || $("#dubDesignExtraOptions").querySelectorAll("select").length >= DESIGN_PROMPT_CHOICES.length;
+    $("#dubDesignExtraOptions").querySelectorAll("select, button").forEach((control) => {
+      control.disabled = !design || Boolean(state.profilePresetKey);
+    });
+    $("#dubCandidateCount").disabled = !design;
     for (const card of document.querySelectorAll(".dub-voice-model-card")) {
       const selected = card.dataset.voiceModel === state.profilePresetKey;
       card.classList.toggle("selected", selected);
@@ -429,7 +782,10 @@
     $("#dubTestProfile").disabled = !(profile?.ready && savedModeMatches && savedDesignMatches && $("#dubProfileAuthorized").checked) && !previewableDesign && !replaceablePreview;
     $("#dubGenerateCandidates").disabled = state.candidateGenerating || !previewableDesign;
     renderVoiceReady(profile, character);
-    if (!design) void syncRoiVoiceReference(profile, character);
+    if (design && profile?.voice_profile_id && state.candidateProfileId === profile.voice_profile_id
+        && state.candidateLoadedProfileId !== profile.voice_profile_id && !state.candidateRefreshInFlight) {
+      void loadDesignCandidates(profile.voice_profile_id);
+    }
   }
   function renderProfileOptions(selectedId = "") {
     const select = $("#dubVoiceSelect");
@@ -447,7 +803,19 @@
   function renderProfileEditor(profile = null, owner = null) {
     if (state.profilePreviewProfileId && state.profilePreviewProfileId !== (profile?.voice_profile_id || "")) clearProfilePreview();
     const profileOwner = profile ? state.characters.find((item) => item.character_id === profile.character_id) || owner : owner;
-    state.editingProfileId = profile?.voice_profile_id || "";
+    const nextProfileId = profile?.voice_profile_id || "";
+    const profileChanged = state.candidateProfileId !== nextProfileId;
+    state.referenceRemoveRequested = false;
+    if (profileChanged) {
+      if (state.candidatePollTimer) clearInterval(state.candidatePollTimer);
+      state.candidatePollTimer = 0;
+      state.candidateItems = state.candidateCache.get(nextProfileId) || [];
+      state.candidateLoadedProfileId = nextProfileId && state.candidateCache.has(nextProfileId) ? nextProfileId : "";
+      state.designCandidateNodes.clear(); $("#dubCandidateList").replaceChildren();
+      state.candidateProfileId = nextProfileId;
+    }
+    state.editingProfileId = nextProfileId;
+    profileDraftDirty = false;
     $("#dubVoiceProfileId").value = state.editingProfileId;
     $("#dubVoiceCharacterId").value = profile?.character_id || profileOwner?.character_id || "";
     $("#dubProfileName").value = profile?.name || (profileOwner ? `${profileOwner.display_name || profileOwner.name} PT-BR` : "");
@@ -458,10 +826,10 @@
     $("#dubPreviewText").value = profile?.preview_text || "";
     $("#dubProfileAuthorized").checked = Boolean(profile?.use_authorized);
     $("#dubSpeed").value = profile?.default_speed ?? 1;
-    $("#dubInstruction").value = profile?.default_instruct || "";
+    $("#dubInstruction").value = profile?.default_direction || "";
     applyVoiceDesignInstruction(profile?.default_instruct || "");
     applyGenerationSettings(profile?.generation_settings_json || {});
-    clearDesignCandidates();
+    if (profileChanged) clearDesignCandidates();
     state.profilePresetKey = profile?.preset_key || "";
     $("#dubReferenceFile").value = "";
     $("#dubReferencePreview").classList.add("hidden");
@@ -472,7 +840,7 @@
     $("#dubToggleVoice").textContent = profile?.active === false ? "Ativar" : "Inativar";
     const fileNote = $(".dub-clone-copy small");
     if (fileNote) fileNote.textContent = profile?.provider_voice_key === "dubsync:design-candidate"
-      ? "Voz oficial criada e salva localmente. A identidade será reutilizada nas próximas falas."
+      ? "A amostra oficial foi salva. Em Gerar voz, cada fala usa os atributos vocais salvos no perfil."
       : attachedRoiAudio
       ? "Este áudio do personagem é reconhecido e preparado automaticamente ao escolher Clonar voz."
       : profile?.reference ? `${fmtDuration(profile.reference.duration_ms)} · ${profile.reference.sample_rate} Hz · referência local${profile.reference.quality_status === "needs_review" ? " · aguarda revisão" : ""}`
@@ -480,11 +848,44 @@
     renderVoiceReady(profile, profileOwner || (state.selectedLine && state.characters.find((entry) => entry.character_id === state.selectedLine.character_id)));
     const authorized = Boolean(profile?.ready);
     $("#dubTestProfile").disabled = !authorized;
-    const canSave = Boolean($("#dubProfileName").value.trim() && $("#dubVoiceCharacterId").value && profileOwner?.name_verified);
-    $("#dubSaveProfile").disabled = !canSave;
-    $("#dubSaveProfile").title = profileOwner?.name_verified ? "Salva os ajustes do perfil no DubSync local." : "Confira a identidade do personagem antes de salvar o perfil vocal.";
+    updateProfileSaveState();
     updateProfileModeControls();
     updateGenerateEnabled();
+    if (nextProfileId && state.candidateLoadedProfileId === nextProfileId) renderDesignCandidates(state.candidateItems);
+    if (profileChanged && nextProfileId && profile?.voice_mode === "design") void loadDesignCandidates(nextProfileId);
+  }
+
+  function refreshVoiceProfilePanel(profileId, { select = false } = {}) {
+    const profile = findProfile(profileId);
+    const owner = profile ? state.characters.find((item) => item.character_id === profile.character_id) : null;
+    renderProfileOptions(select ? profileId : $("#dubVoiceSelect").value);
+    refreshStoredVoiceProfileControls(owner);
+    if (owner?.character_id === state.selectedCharacterId) renderCharacterDetail(owner);
+    if (profile && (select || state.editingProfileId === profileId)) {
+      renderProfileEditor(profile, owner);
+    } else if (!profile && state.editingProfileId === profileId) {
+      renderProfileEditor(null, currentStudioCharacter());
+    }
+    updateGenerateEnabled();
+    return profile;
+  }
+
+  function refreshVoiceProfileStatus(profileId, { updateModeControls = false, refreshCandidates = false } = {}) {
+    const profile = findProfile(profileId);
+    if (!profile) return null;
+    const owner = state.characters.find((item) => item.character_id === profile.character_id);
+    const selectedId = $("#dubVoiceSelect").value;
+    // This selector alone depends on a profile's name, active state, and readiness.
+    renderProfileOptions(selectedId);
+    refreshStoredVoiceProfileControls(owner);
+    if (owner?.character_id === state.selectedCharacterId) renderCharacterDetail(owner);
+    if (state.editingProfileId === profileId) {
+      if (updateModeControls) updateProfileModeControls();
+      else renderVoiceReady(profile, owner);
+    }
+    if (refreshCandidates && state.candidateProfileId === profileId) renderDesignCandidates(state.candidateItems);
+    updateGenerateEnabled();
+    return profile;
   }
 
   function currentStudioCharacter() {
@@ -561,7 +962,9 @@
     if (!cursor) return;
     if (!(total > 0) || !Number.isFinite(video?.currentTime)) { cursor.hidden = true; return; }
     cursor.hidden = false;
-    cursor.style.left = `${Math.max(0, Math.min(100, video.currentTime / total * 100))}%`;
+    const current = state.blockPlan?.sessions?.find((item) => item.session_id === state.selectedSessionId);
+    const offset = Number(state.blockPlan?.sectors?.find((item) => item.index === Number(current?.sector_index || 1))?.offset) || 0;
+    cursor.style.left = `${Math.max(0, Math.min(100, (offset + video.currentTime) / total * 100))}%`;
   }
 
   function renderDubbingBlockPlan(error = "") {
@@ -577,22 +980,29 @@
       updateDubbingBlockCursor(); return;
     }
     const root = chain[0], rootStart = Number(root.source_start) || 0;
-    const plan = []; let lastEnd = rootStart;
-    for (const session of chain) {
-      const config = session.config_json || {}, start = Number(session.source_start) || 0;
-      const duration = Number(config.duration || session.requested_duration) || 0;
-      const end = Math.min(total || Infinity, start + duration);
-      if (duration > 0 && end > start) {
-        plan.push({ index: Math.max(1, Number(config.block_index || 1)), start, end, session });
-        lastEnd = Math.max(lastEnd, end);
+    const sectors = state.blockPlan?.sectors?.length ? state.blockPlan.sectors
+      : [{ index: 1, offset: 0, duration: total, block_duration_seconds: 0 }];
+    const plan = []; let nextIndex = 1;
+    for (const sector of sectors) {
+      const offset = Number(sector.offset) || 0, endOfSector = offset + Number(sector.duration || 0);
+      const captured = chain.filter((item) => Number(item.sector_index || item.config_json?.sector_index || 1) === Number(sector.index));
+      let cursor = offset + (Number(sector.index) === 1 ? rootStart : 0);
+      for (const session of captured) {
+        const config = session.config_json || {}, start = offset + (Number(session.source_start) || 0);
+        const duration = Number(config.duration || session.requested_duration) || 0;
+        const end = Math.min(endOfSector || Infinity, start + duration);
+        if (duration > 0 && end > start) {
+          const index = Math.max(1, Number(config.block_index || nextIndex));
+          plan.push({ index, start, end, session, sector }); cursor = Math.max(cursor, end);
+          nextIndex = Math.max(nextIndex, index + 1);
+        }
       }
-    }
-    const inferredStep = Number([...chain].reverse().map((item) => item.config_json?.block_duration_requested).find((value) => Number(value) > 0))
-      || Number(root.config_json?.duration || root.requested_duration) || 1200;
-    if (total > 0 && plan.length) {
-      let cursor = lastEnd, index = Math.max(...plan.map((item) => item.index)) + 1;
-      for (let count = 0; cursor < total - .01 && count < 5000; count++, index++) {
-        const end = Math.min(total, cursor + inferredStep); plan.push({ index, start: cursor, end, session: null }); cursor = end;
+      const step = Number(sector.block_duration_seconds)
+        || Number([...captured].reverse().map((item) => item.config_json?.block_duration_requested).find((value) => Number(value) > 0))
+        || Number(root.config_json?.duration || root.requested_duration) || 1200;
+      for (let count = 0; endOfSector > 0 && cursor < endOfSector - .01 && count < 5000; count++) {
+        const end = Math.min(endOfSector, cursor + step);
+        plan.push({ index: nextIndex++, start: cursor, end, session: null, sector }); cursor = end;
       }
     }
     const actualTotal = total || Math.max(plan.at(-1)?.end || 0, 1);
@@ -621,7 +1031,8 @@
       block.append(fill);
       const label = complete ? "Dublagem concluída" : count === 0 ? (item.session ? "Sem falas elegíveis" : "Aguardando captura")
         : active ? "Na fila de dublagem" : errored ? "Com erros" : done ? "Parcialmente dublado" : "Aguardando dublagem";
-      block.title = `Bloco ${item.index} · ${fmtClock(item.start)}–${fmtClock(item.end)} · ${label} · ${done}/${count} falas${stats.errors ? ` · ${stats.errors} erros` : ""}`;
+      const offset = Number(item.sector?.offset) || 0;
+      block.title = `Vídeo ${item.sector?.index || 1} · Bloco ${item.index} · ${fmtClock(item.start - offset)}–${fmtClock(item.end - offset)} · ${label} · ${done}/${count} falas${stats.errors ? ` · ${stats.errors} erros` : ""}`;
       block.setAttribute("aria-label", block.title);
       block.disabled = !item.session;
       if (item.session) block.addEventListener("click", () => void selectDubbingBlock(item.session.session_id));
@@ -636,7 +1047,7 @@
     const current = plan.find((item) => item.session?.session_id === state.selectedSessionId);
     const charLabel = character ? `Personagem: ${character.display_name || character.name}` : "Todos os personagens";
     $("#dubOverviewCurrentLabel").textContent = current
-      ? `Bloco ${current.index} · ${fmtClock(current.start)}–${fmtClock(current.end)} · ${charLabel}`
+      ? `Vídeo ${current.sector?.index || 1} · Bloco ${current.index}/${plan.length} · ${fmtClock(current.start - Number(current.sector?.offset || 0))}–${fmtClock(current.end - Number(current.sector?.offset || 0))} · ${charLabel}`
       : `${charLabel} · ${chain.length} bloco(s) capturado(s); os próximos blocos cinza aguardam captura`;
     updateDubbingBlockCursor();
   }
@@ -653,7 +1064,7 @@
   }
 
   async function loadAll(preserveSelection = true) {
-    if (state.loading) return;
+    if (state.loading) { state.refreshRequested = true; return; }
     state.loading = true;
     try {
       const previousSessionId = state.selectedSessionId;
@@ -679,6 +1090,15 @@
       setText("#dubListFooter", error.message);
     } finally {
       state.loading = false;
+      if (state.refreshRequested) {
+        state.refreshRequested = false;
+        if (pendingSharedNavigation?.sessionId) state.selectedSessionId = pendingSharedNavigation.sessionId;
+        window.setTimeout(() => void loadAll(preserveSelection), 0);
+      } else if (pendingSharedNavigation) {
+        const context = pendingSharedNavigation;
+        pendingSharedNavigation = null;
+        window.setTimeout(() => void applySharedNavigation(context), 0);
+      }
     }
   }
 
@@ -686,8 +1106,12 @@
     const select = $("#dubSessionFilter");
     const previous = state.selectedSessionId || select.value;
     select.replaceChildren();
-    for (const item of items) {
-      const option = make("option", "", `${item.state === "complete" ? "✓" : "·"} ${new Date(item.created_at).toLocaleString("pt-BR")} · ${item.line_count} ocorrências`);
+    for (const [position, item] of items.entries()) {
+      const index = Number(item.block_index) || position + 1;
+      const total = Number(item.block_total) || Math.max(index, items.length);
+      const blockLabel = `Bloco ${index}/${total}`;
+      const dateLabel = item.created_at ? new Date(item.created_at).toLocaleString("pt-BR") : "sessão";
+      const option = make("option", "", `${item.state === "complete" ? "✓" : "·"} ${blockLabel} · ${dateLabel} · ${item.line_count} ocorrências`);
       option.value = item.session_id;
       select.append(option);
     }
@@ -698,6 +1122,61 @@
     }
     select.value = items.some((item) => item.session_id === previous) ? previous : state.selectedSessionId;
     state.selectedSessionId = select.value;
+    updateDeleteBlockButton(items);
+  }
+
+  function updateDeleteBlockButton(items = state.overview?.sessions || []) {
+    const button = $("#dubDeleteBlock"), select = $("#dubSessionFilter");
+    if (!button || !select) return;
+    const item = items.find((candidate) => candidate.session_id === select.value);
+    const deletable = Boolean(item && ["complete", "failed", "stopped"].includes(item.state));
+    button.disabled = !deletable;
+    if (!item) button.title = "Selecione um bloco capturado para excluí-lo";
+    else if (!deletable) button.title = "Este bloco ainda está em andamento e não pode ser excluído";
+    else button.title = `Excluir permanentemente o Bloco ${Number(item.block_index) || 1}/${Number(item.block_total) || items.length || 1}`;
+  }
+
+  async function deleteSelectedBlock() {
+    const sessionId = $("#dubSessionFilter").value;
+    const sessions = state.overview?.sessions || [];
+    const selectedIndex = sessions.findIndex((item) => item.session_id === sessionId);
+    const item = sessions[selectedIndex];
+    if (!item || !["complete", "failed", "stopped"].includes(item.state)) return;
+    const blockIndex = Number(item.block_index) || selectedIndex + 1;
+    const blockTotal = Number(item.block_total) || Math.max(blockIndex, sessions.length);
+    const confirmed = window.confirm(
+      `Excluir permanentemente o Bloco ${blockIndex}/${blockTotal}?\n\n` +
+      `Serão removidos os diálogos, capturas e takes exclusivos deste bloco. Falas compartilhadas com outros blocos serão preservadas. O vídeo de origem será mantido. Esta ação não pode ser desfeita.`,
+    );
+    if (!confirmed) return;
+
+    const button = $("#dubDeleteBlock");
+    button.disabled = true;
+    try {
+      const params = new URLSearchParams({ project_id: window.DUBSYNC_PROJECT_ID || "" });
+      const result = await requestCapture(
+        `/api/sessions/${encodeURIComponent(sessionId)}/block?${params}`,
+        { method: "DELETE" },
+      );
+      const remaining = sessions.filter((candidate) => candidate.session_id !== sessionId);
+      state.selectedSessionId = (remaining[selectedIndex] || remaining[selectedIndex - 1])?.session_id || "";
+      state.blockPlan = null;
+      state.blockPlanSessionId = "";
+      state.timelineSelectedOccurrenceIds.clear();
+      resetBatchSelection();
+      await loadAll(false);
+      const syncNote = result.game_sync?.status === "queued"
+        ? " Sincronização do jogo enfileirada."
+        : result.game_sync?.status === "not_ready"
+          ? ` O jogo não foi atualizado: ${result.game_sync.message}` : "";
+      const sharedNote = result.preserved_shared_occurrences
+        ? ` ${result.preserved_shared_occurrences} fala(s) compartilhada(s) preservada(s).` : "";
+      toast(`Bloco ${blockIndex}/${blockTotal} excluído.${sharedNote}${syncNote}`);
+    } catch (error) {
+      toast(`Não foi possível excluir o bloco: ${error.message}`, true);
+    } finally {
+      updateDeleteBlockButton();
+    }
   }
 
   function renderSummary(summary) {
@@ -784,22 +1263,91 @@
 
   function lineStageStatus(item) {
     const take = item.takes?.[0];
-    if (take?.status === "generating") return { key: "generating", label: "◌ Gerando…", take };
-    if (take?.status === "queued") return { key: "queued", label: "◷ Na fila", take };
-    if (take?.status === "error") return { key: "error", label: "⚠ Erro na geração", take };
-    if (take?.status === "review") return { key: "generated", label: "✓ Take gerado · revisar", take };
-    if (take?.status === "approved") return { key: "approved", label: "✓ Concluído na Dublagem", take };
-    if (take?.status === "rejected") return { key: "rejected", label: "↻ Take rejeitado · pronto para refazer", take };
-    if (item.editorial_status === "accepted") return { key: "ready-to-dub", label: "✓ Captura concluída · pronto para dublar", take };
-    if (item.editorial_status === "corrected") return { key: "corrected", label: "✎ Corrigido · pronto para dublar", take };
-    if (item.editorial_status === "discarded") return { key: "discarded", label: "○ Descartada", take };
-    return { key: "pending", label: "○ Pendente na Captura", take };
+    if (take?.status === "generating") return { key: "generating", label: "◌ Gerando…", take, title: "O OmniVoice está criando o áudio. O arquivo ainda pode não estar disponível para reprodução." };
+    if (take?.status === "queued") return { key: "queued", label: "◷ Na fila", take, title: "Esta fala aguarda sua vez na fila de geração." };
+    if (take?.status === "error") return { key: "error", label: "⚠ Erro na geração", take, title: take.error_message || "A geração do áudio falhou. Abra o Take Studio para ver os detalhes e tentar novamente." };
+    if (take?.status === "generated") return { key: "publishing", label: "◌ Aguardando envio ao jogo", take, title: "O áudio já foi gerado. DubSync ainda vai montar e ativar o pacote de falas no jogo." };
+    if (take?.status === "review") return { key: "review", label: "◌ Em revisão", take, title: "O áudio foi gerado e aguarda revisão/aprovação antes de ser publicado no jogo." };
+    if (take?.status === "publishing") return { key: "publishing", label: "◌ Sincronizando com o jogo…", take, title: "DubSync está incluindo este áudio no pacote do jogo e tentando ativá-lo. Ao concluir, o estado muda para pronto ou mostra a falha de envio." };
+    if (take?.status === "publish_error") return { key: "error", label: "⚠ Falha ao enviar ao jogo", take, title: take.error_message ? `O áudio foi gerado, mas não entrou no jogo. Motivo: ${take.error_message}` : "O áudio foi gerado, mas não foi possível incluí-lo/ativá-lo no jogo. Abra o Take Studio para ver o diagnóstico." };
+    if (take?.status === "ready") return { key: "ready", label: "✓ Pronta no jogo", take, title: "Take incluído no pacote ativo do jogo. A confirmação de reprodução depende de o jogo reconhecer a fala e iniciar o áudio." };
+    if (take?.status === "approved") return { key: "ready", label: "✓ Take aprovado", take, title: "Take aprovado no DubSync. A aprovação, sozinha, não confirma que ele já foi ativado no pacote do jogo." };
+    if (take?.status === "cancelled") return { key: "cancelled", label: "○ Geração cancelada", take, title: take.error_message || "A geração foi cancelada antes de terminar; nenhum áudio novo foi produzido." };
+    if (take?.status === "superseded") return { key: "superseded", label: "↻ Substituída", take, title: "Uma versão mais recente substituiu este take." };
+    if (take?.status === "rejected") return { key: "rejected", label: "↻ Take rejeitado · pronto para refazer", take, title: "Este take foi rejeitado e não será usado no jogo. Gere outro para substituí-lo." };
+    if (item.editorial_status === "accepted") return { key: "ready-to-dub", label: "✓ Captura concluída · pronto para dublar", take, title: "A fala foi confirmada na Captura e pode ser enviada para geração." };
+    if (item.editorial_status === "corrected") return { key: "corrected", label: "✎ Corrigido · pronto para dublar", take, title: "O texto foi corrigido e pode ser enviado para geração." };
+    if (item.editorial_status === "discarded") return { key: "discarded", label: "○ Descartada", take, title: "Esta fala foi descartada na Captura e não entra na geração normal." };
+    return { key: "pending", label: "○ Pendente na Captura", take, title: "Esta fala ainda precisa ser confirmada ou corrigida na Captura antes da geração." };
+  }
+
+  function syncLineTableAudioButtons() {
+    const isPlaying = Boolean(lineTableAudio && !lineTableAudio.paused && lineTablePlayingTakeId);
+    document.querySelectorAll(".dub-line-audio-button").forEach((button) => {
+      const active = isPlaying && button.dataset.takeId === lineTablePlayingTakeId;
+      button.textContent = active ? "❚❚" : "▶";
+      button.setAttribute("aria-label", active ? "Pausar áudio da fala" : "Reproduzir áudio da fala");
+      button.title = active ? "Pausar este áudio" : button.dataset.takeVersion ? `Ouvir take T${button.dataset.takeVersion}` : "Ouvir áudio gerado";
+    });
+  }
+
+  function createLineTableAudioCell(item) {
+    const cell = make("td", "dub-line-audio-cell");
+    const takes = item.takes || [];
+    const take = takes.find((entry) => entry.audio_master_path && !["superseded", "rejected"].includes(entry.status))
+      || takes.find((entry) => entry.audio_master_path);
+    const button = make("button", "button quiet dub-line-audio-button", "▶");
+    button.type = "button";
+    button.disabled = !take?.take_id;
+    if (take?.take_id) {
+      button.dataset.takeId = take.take_id;
+      button.dataset.takeVersion = String(take.version || "");
+      button.title = `Ouvir take T${take.version || "—"}`;
+      button.setAttribute("aria-label", `Reproduzir áudio do take ${take.version || ""}`);
+    } else {
+      button.title = "Ainda não há áudio gerado disponível para esta fala.";
+      button.setAttribute("aria-label", "Áudio ainda não disponível");
+    }
+    button.addEventListener("click", async (event) => {
+      event.preventDefault(); event.stopPropagation();
+      if (!take?.take_id) return;
+      if (!lineTableAudio) {
+        lineTableAudio = new Audio();
+        lineTableAudio.preload = "none";
+        lineTableAudio.addEventListener("ended", () => { lineTablePlayingTakeId = ""; syncLineTableAudioButtons(); });
+        lineTableAudio.addEventListener("error", () => {
+          lineTablePlayingTakeId = ""; syncLineTableAudioButtons();
+          toast("Não foi possível carregar o áudio deste take. Confira se o arquivo ainda existe no projeto.", true);
+        });
+      }
+      if (lineTablePlayingTakeId === take.take_id && !lineTableAudio.paused) {
+        lineTableAudio.pause();
+        syncLineTableAudioButtons();
+        return;
+      }
+      if (lineTablePlayingTakeId !== take.take_id) {
+        lineTableAudio.pause();
+        lineTablePlayingTakeId = take.take_id;
+        lineTableAudio.src = takeAudioUrl(take.take_id);
+        lineTableAudio.load();
+      }
+      try {
+        await lineTableAudio.play();
+        syncLineTableAudioButtons();
+      } catch (error) {
+        lineTablePlayingTakeId = ""; syncLineTableAudioButtons();
+        toast(`Não foi possível reproduzir o áudio: ${error.message}`, true);
+      }
+    });
+    button.addEventListener("keydown", (event) => event.stopPropagation());
+    cell.append(button);
+    return cell;
   }
   function updateSelectionCount() {
     const selectedCount = state.selectedOccurrenceIds.size;
     const generatingCount = state.selectionBatchOccurrenceIds.size;
     setText("#dubSelectedCount", selectedCount
-      ? `${selectedCount} ${selectedCount === 1 ? "fala marcada" : "falas marcadas"}${generatingCount ? ` · ${generatingCount} na fila` : " · clique em Gerar selecionadas"}`
+      ? `${selectedCount} ${selectedCount === 1 ? "fala marcada" : "falas marcadas"}${generatingCount ? ` · ${generatingCount} gerando ou sincronizando` : ""}`
       : "0 falas selecionadas");
     const visible = state.lines.map((item) => item.occurrence_id);
     const selectedVisible = visible.filter((id) => state.selectedOccurrenceIds.has(id)).length;
@@ -829,17 +1377,19 @@
     for (const item of queue.batch.occurrences || []) {
       const occurrenceId = item.occurrence_id;
       if (!state.selectionBatchOccurrenceIds.has(occurrenceId)) continue;
-      const status = String(item.status || "");
+      const jobStatus = String(item.status || "");
+      const takeStatus = String(item.take_status || "");
+      const status = `${jobStatus}:${takeStatus}`;
       if (state.selectionBatchStatuses.get(occurrenceId) !== status) {
         state.selectionBatchStatuses.set(occurrenceId, status);
         changed = true;
       }
-      if (status === "completed") {
+      if (["ready", "approved"].includes(takeStatus)) {
         state.selectionBatchOccurrenceIds.delete(occurrenceId);
         state.selectedOccurrenceIds.delete(occurrenceId);
         state.batchGeneratedOccurrenceIds.add(occurrenceId);
-      } else if (["error", "cancelled"].includes(status)) {
-        // Keep failed/cancelled lines selected so they can be retried explicitly.
+      } else if (["error", "cancelled"].includes(jobStatus) || takeStatus === "publish_error") {
+        // Keep failed lines selected so they can be retried explicitly.
         state.selectionBatchOccurrenceIds.delete(occurrenceId);
       }
     }
@@ -859,8 +1409,80 @@
     }
     return /^#[0-9a-f]{6}$/i.test(String(character?.color || "")) ? character.color : "";
   }
+  function updateSelectedLineRow(occurrenceId) {
+    const body = $("#dubLinesBody");
+    const timelineFollows = $("#dubAutoFollowTimeline")?.checked && !$("#dubPreviewVideo")?.paused;
+    const nextRow = lineRowByOccurrence.get(occurrenceId);
+    if (body.querySelector(".timeline-followed") || (timelineFollows && !nextRow)) {
+      renderLines();
+      return;
+    }
+    body.querySelector(".dub-line-row.selected")?.classList.remove("selected");
+    nextRow?.classList.add("selected");
+  }
+  function updateLineRowFromState(item, changedFields) {
+    const row = lineRowByOccurrence.get(item?.occurrence_id);
+    const characterChanged = ["character_id", "character_name"]
+      .some((field) => changedFields.has(field));
+    const textChanged = changedFields.has("dub_text");
+    const characterCell = characterChanged ? row?.querySelector(".dub-line-character-cell") : null;
+    if (characterCell) {
+      characterCell.replaceChildren();
+      const color = colorForLineItem(item);
+      if (color) {
+        characterCell.style.color = color;
+        const dot = make("i", "event-character-color-dot");
+        dot.style.backgroundColor = color; dot.setAttribute("aria-hidden", "true");
+        characterCell.append(dot, document.createTextNode(String(item.character_name || "Sem personagem")));
+      } else {
+        characterCell.style.removeProperty("color");
+        characterCell.textContent = item.character_name || "Sem personagem";
+      }
+    }
+    const textCell = textChanged ? row?.querySelector(".dub-line-text-cell") : null;
+    if (textCell) textCell.textContent = item.dub_text || item.source_text || "—";
+    const pin = characterChanged || textChanged ? timelinePinByOccurrence.get(item.occurrence_id) : null;
+    if (pin) {
+      const color = colorForLineItem(item) || "#65a7ff";
+      pin.style.setProperty("--character-color", color);
+      pin.title = `#${item.event?.sequence ?? "—"} · ${item.character_name || "Sem personagem"} · ${fmtTime(item.source_start_time)}\n${item.dub_text || item.source_text || ""}\nClique para selecionar; duplo clique para ir ao início.`;
+      pin.setAttribute("aria-label", `Diálogo ${item.event?.sequence ?? ""}, ${item.character_name || "sem personagem"}, ${fmtTime(item.source_start_time)}`);
+    }
+  }
+  function updateSavedLineInViews(lineId, saved) {
+    const fields = ["dub_text", "emotion", "emotion_intensity", "character_id", "character_name",
+      "character_verified", "voice_profile_id", "voice_profile_name", "voice_ready"];
+    const apply = (item) => {
+      if (item.line_id !== lineId) return;
+      const changedFields = new Set();
+      for (const field of fields) {
+        if (!Object.hasOwn(saved, field)) continue;
+        if (!Object.is(item[field], saved[field])) changedFields.add(field);
+        item[field] = saved[field];
+      }
+      if (changedFields.size) updateLineRowFromState(item, changedFields);
+    };
+    state.lines.forEach(apply);
+    state.playbackLines.forEach(apply);
+    if (state.selectedLine?.line_id === lineId) apply(state.selectedLine);
+  }
+  function updateLineRowStatus(item) {
+    const row = lineRowByOccurrence.get(item?.occurrence_id), cell = row?.querySelector(".dub-line-status-cell");
+    if (!cell) return;
+    cell.replaceChildren();
+    const stage = lineStageStatus(item);
+    const badge = make("span", `dub-row-status ${stage.key}`, stage.label);
+    badge.title = stage.title || "Passe o mouse sobre este estado para entender o que está acontecendo.";
+    cell.append(badge);
+    if (stage.take?.version) cell.append(make("small", `dub-take-status ${stage.take.status}`, ` T${stage.take.version}`));
+    if (item.conflict_occurrence_ids.length) cell.append(make("i", "dub-conflict-mark", " ⚠"));
+  }
+  function refreshLineReviewMetric() {
+    setText("#dubMetricReview", state.lines.filter((item) => ["generated", "publishing", "review"].includes(item.takes?.[0]?.status)).length);
+    updateSelectionCount();
+  }
   function renderLines() {
-    const body = $("#dubLinesBody"); body.replaceChildren();
+    const body = $("#dubLinesBody"); body.replaceChildren(); lineRowByOccurrence.clear();
     const items = state.lines.slice();
     const timelineFollows = $("#dubAutoFollowTimeline")?.checked && !$("#dubPreviewVideo")?.paused;
     const timelineLine = timelineFollows
@@ -868,21 +1490,23 @@
       : null;
     const timelineLineOutsideFilters = Boolean(timelineLine && !items.some((item) => item.occurrence_id === timelineLine.occurrence_id));
     if (timelineLineOutsideFilters) items.push(timelineLine);
-    items.sort((a, b) => Number(a.source_start_time) - Number(b.source_start_time));
+    items.sort(compareLineItems);
     setText("#dubLineCount", items.length);
     setText("#dubMetricEligible", items.filter((item) => ["accepted", "corrected"].includes(item.editorial_status)).length);
     setText("#dubMetricWithoutTake", items.filter((item) => !item.take_count).length);
-    setText("#dubMetricReview", items.filter((item) => item.takes.some((take) => take.status === "review")).length);
+    setText("#dubMetricReview", items.filter((item) => ["generated", "publishing", "review"].includes(item.takes?.[0]?.status)).length);
     setText("#dubMetricConflicts", items.filter((item) => item.conflict_occurrence_ids.length).length);
     setText("#dubListFooter", `${items.length} ocorrência(s) exibida(s). Eventos de sessões repetidas permanecem separados para revisão humana.${timelineLineOutsideFilters ? " A fala ativa foi incluída fora dos filtros para acompanhar a timeline." : ""}`);
     if (!items.length) {
-      const row = make("tr"); const cell = make("td", "dub-table-empty", "Nenhuma fala corresponde a estes filtros."); cell.colSpan = 7; row.append(cell); body.append(row); updateSelectionCount(); renderDubDialogueTimeline(); return;
+      const row = make("tr"); const cell = make("td", "dub-table-empty", "Nenhuma fala corresponde a estes filtros."); cell.colSpan = 9; row.append(cell); body.append(row); updateSelectionCount(); renderDubDialogueTimeline(); return;
     }
     for (const item of items) {
       const isTimelineOnly = timelineLineOutsideFilters && item.occurrence_id === timelineLine.occurrence_id;
       const generated = state.batchGeneratedOccurrenceIds.has(item.occurrence_id)
-        || ["review", "approved"].includes(item.takes?.[0]?.status);
+        || ["ready", "approved"].includes(item.takes?.[0]?.status);
       const row = make("tr", `dub-line-row${state.selectedLine?.occurrence_id === item.occurrence_id ? " selected" : ""}${state.selectedOccurrenceIds.has(item.occurrence_id) ? " batch-selected" : ""}${generated ? " batch-generated" : ""}${isTimelineOnly ? " timeline-followed" : ""}`);
+      row.dataset.occurrenceId = item.occurrence_id;
+      lineRowByOccurrence.set(item.occurrence_id, row);
       if (isTimelineOnly) row.title = "Fala ativa na timeline; exibida mesmo fora dos filtros atuais.";
       row.tabIndex = 0;
       row.addEventListener("click", () => { setDubTimelineSelection([item.occurrence_id], item.occurrence_id); void selectLine(item.occurrence_id); });
@@ -901,7 +1525,7 @@
         if (checkbox.checked) state.batchGeneratedOccurrenceIds.delete(item.occurrence_id);
         row.classList.toggle("batch-selected", checkbox.checked);
         row.classList.toggle("batch-generated", state.batchGeneratedOccurrenceIds.has(item.occurrence_id)
-          || ["review", "approved"].includes(item.takes?.[0]?.status));
+          || ["ready", "approved"].includes(item.takes?.[0]?.status));
         updateSelectionCount();
       });
       const checkboxTarget = make("label", "dub-line-select-target");
@@ -911,41 +1535,46 @@
       numberCell.append(checkboxTarget);
       row.append(numberCell);
       const cells = [
-        item.occurrence_id.slice(-8).toUpperCase(), fmtTime(item.source_start_time),
+        item.occurrence_id.slice(-8).toUpperCase(), fmtSourceTime(item.source_start_time),
+        fmtSourceTime(item.source_end_time),
         item.character_name, item.dub_text || item.source_text || "—", fmtDuration(item.target_duration_ms),
       ];
       const lineColor = colorForLineItem(item);
       for (const [index, value] of cells.entries()) {
-        const cell = make("td");
-        if (index === 2 && lineColor) {
+        const cell = make("td", `${index === 1 || index === 2 ? "dub-time-cell " : ""}${index === 3 ? "dub-line-character-cell" : ""}${index === 4 ? "dub-line-text-cell" : ""}`.trim());
+        if (index === 3 && lineColor) {
           cell.style.color = lineColor;
           const dot = make("i", "event-character-color-dot"); dot.style.backgroundColor = lineColor; dot.setAttribute("aria-hidden", "true");
           cell.append(dot, document.createTextNode(String(value)));
         } else cell.textContent = String(value);
         row.append(cell);
       }
-      const stateCell = make("td");
+      row.append(createLineTableAudioCell(item));
+      const stateCell = make("td", "dub-line-status-cell");
       const stage = lineStageStatus(item);
       const pill = make("span", `dub-row-status ${stage.key}`, stage.label);
+      pill.title = stage.title || "Passe o mouse sobre este estado para entender o que está acontecendo.";
       stateCell.append(pill);
       const take = stage.take;
       if (take?.version) stateCell.append(make("small", `dub-take-status ${take.status}`, ` T${take.version}`));
       if (item.conflict_occurrence_ids.length) stateCell.append(make("i", "dub-conflict-mark", " ⚠"));
       row.append(stateCell); body.append(row);
     }
-    updateSelectionCount(); renderDubDialogueTimeline();
+    updateSelectionCount(); syncLineTableAudioButtons(); renderDubDialogueTimeline();
   }
 
   function initializeLineColumnResizers() {
     const table = $(".dub-lines-table"), scroll = $(".dub-table-scroll");
     if (!table || !scroll) return;
     const headers = [...table.tHead.rows[0].cells];
-    const defaults = [72, 96, 80, 150, 340, 78, 175];
-    const minimums = [66, 68, 54, 80, 150, 55, 90];
-    const maximums = [120, 300, 240, 360, 1000, 180, 350];
+    const defaults = [72, 96, 112, 112, 150, 340, 78, 54, 175];
+    const minimums = [66, 68, 105, 105, 80, 150, 55, 46, 90];
+    const maximums = [120, 300, 220, 220, 360, 1000, 180, 76, 350];
     const storageKey = "dubsync.dub.lineColumns.v1";
     let saved = [];
     try { saved = JSON.parse(localStorage.getItem(storageKey) || "[]"); } catch { /* use the readable defaults */ }
+    if (Array.isArray(saved) && saved.length === 7) saved.splice(3, 0, 112);
+    if (Array.isArray(saved) && saved.length === 8) saved.splice(7, 0, defaults[7]);
     const widths = defaults.map((value, index) => {
       const candidate = Number(saved[index]);
       return Number.isFinite(candidate) ? Math.max(minimums[index], Math.min(maximums[index], candidate)) : value;
@@ -968,7 +1597,7 @@
       const grip = document.createElement("button");
       grip.type = "button";
       grip.className = "dub-column-resizer";
-      grip.setAttribute("aria-label", `Redimensionar coluna ${header.textContent.trim() || index + 1}`);
+      grip.setAttribute("aria-label", `Redimensionar coluna ${header.querySelector(".dub-sort-label")?.textContent.trim() || header.textContent.trim() || index + 1}`);
       grip.setAttribute("aria-valuemin", String(minimums[index]));
       grip.setAttribute("aria-valuemax", String(maximums[index]));
       grip.setAttribute("aria-valuenow", String(widths[index]));
@@ -1007,6 +1636,59 @@
     if (typeof ResizeObserver === "function") new ResizeObserver(applyWidths).observe(scroll);
   }
 
+  const lineSortValue = {
+    sequence: (item) => Number(item.event?.sequence ?? 0),
+    occurrence: (item) => item.occurrence_id || "",
+    start: (item) => Number(item.source_start_time),
+    end: (item) => Number(item.source_end_time),
+    character: (item) => item.character_name || "",
+    text: (item) => item.dub_text || item.source_text || "",
+    target: (item) => Number(item.target_duration_ms),
+    status: (item) => lineStageStatus(item).label || "",
+  };
+
+  function compareLineItems(a, b) {
+    const getter = lineSortValue[state.lineSort.key] || lineSortValue.start;
+    const left = getter(a), right = getter(b);
+    let result = typeof left === "number" && typeof right === "number"
+      ? (Number.isFinite(left) && Number.isFinite(right) ? left - right : Number.isFinite(left) ? -1 : Number.isFinite(right) ? 1 : 0)
+      : String(left).localeCompare(String(right), "pt-BR", { numeric: true, sensitivity: "base" });
+    if (result) return result * (state.lineSort.direction === "desc" ? -1 : 1);
+    return (Number(a.source_start_time) - Number(b.source_start_time))
+      || String(a.occurrence_id || "").localeCompare(String(b.occurrence_id || ""), "pt-BR", { numeric: true });
+  }
+
+  function updateLineSortIndicators() {
+    document.querySelectorAll(".dub-lines-table th[data-sort-key]").forEach((header) => {
+      const button = header.querySelector(".dub-sort-button");
+      const indicator = header.querySelector(".dub-sort-indicator");
+      if (!button || !indicator) return;
+      const active = header.dataset.sortKey === state.lineSort.key;
+      const ascending = state.lineSort.direction === "asc";
+      indicator.textContent = active ? (ascending ? "↑" : "↓") : "↕";
+      header.setAttribute("aria-sort", active ? (ascending ? "ascending" : "descending") : "none");
+      const label = header.querySelector(".dub-sort-label")?.textContent.trim() || "coluna";
+      button.title = active
+        ? `Ordenação por ${label}: ${ascending ? "crescente" : "decrescente"}. Clique para inverter.`
+        : `Ordenar por ${label} em ordem crescente.`;
+      button.setAttribute("aria-label", button.title);
+    });
+  }
+
+  function initializeLineSortControls() {
+    document.querySelectorAll(".dub-lines-table th[data-sort-key] .dub-sort-button").forEach((button) => {
+      button.addEventListener("click", () => {
+        const key = button.closest("th")?.dataset.sortKey;
+        if (!key || !lineSortValue[key]) return;
+        if (state.lineSort.key === key) state.lineSort.direction = state.lineSort.direction === "asc" ? "desc" : "asc";
+        else state.lineSort = { key, direction: "asc" };
+        updateLineSortIndicators();
+        renderLines();
+      });
+    });
+    updateLineSortIndicators();
+  }
+
   async function selectLine(occurrenceId, rerender = true, playbackToken = null) {
     if (playbackToken == null) {
       state.timelinePlaybackToken += 1;
@@ -1031,7 +1713,7 @@
       if (playbackToken != null && playbackToken !== state.timelinePlaybackToken) return false;
       state.selectedLine = detail;
       state.selectedTakeId = "";
-      if (rerender) renderLines();
+      if (rerender) updateSelectedLineRow(occurrenceId);
       fillStudio(detail);
       await renderTakes(detail.takes || []);
       setupVideo(detail);
@@ -1048,7 +1730,59 @@
     lineDirty = false; lineEditRevision += 1;
     setLineSaveStatus("Selecione uma fala", "saved");
     $("#dubGenerateTake").disabled = true;
+    resetSingleTakeSpeed(null);
     $("#dubTakeList").replaceChildren(make("div", "dub-empty-mini", "Selecione uma ocorrência para revisar os takes."));
+  }
+
+  function resetSingleTakeSpeed(item) {
+    const input = $("#dubSingleTakeSpeed"), suggest = $("#dubSuggestTakeSpeed"), hint = $("#dubSingleTakeSpeedHint");
+    if (!input || !suggest || !hint) return;
+    input.value = "";
+    input.disabled = !item;
+    const hasMeasuredTake = (item?.takes || []).some((take) => Number(take.actual_duration_ms) > 0);
+    suggest.disabled = !item || !hasMeasuredTake;
+    hint.textContent = "Ajuste vale apenas para o próximo take desta fala; o perfil e as demais falas não mudam. Ao usar a velocidade pontual, a duração-alvo do perfil será ignorada nesta geração.";
+  }
+
+  function suggestSingleTakeSpeed() {
+    const current = state.selectedLine;
+    const item = current && (state.lines.find((line) => line.occurrence_id === current.occurrence_id) || current);
+    const hint = $("#dubSingleTakeSpeedHint"), input = $("#dubSingleTakeSpeed");
+    const take = (item?.takes || []).filter((entry) => Number(entry.actual_duration_ms) > 0)
+      .sort((a, b) => Number(b.version || 0) - Number(a.version || 0))[0];
+    if (!item || !take) {
+      hint.textContent = "Gere ao menos um take para calcular uma sugestão; também pode informar a velocidade manualmente.";
+      return;
+    }
+    const start = Number(item.source_start_time);
+    const sourceEnd = Number(item.source_end_time);
+    const fallbackEnd = Number(item.target_duration_ms) > 0
+      ? start + Number(item.target_duration_ms) / 1000 : NaN;
+    const capturedEnd = Number.isFinite(sourceEnd) && sourceEnd > start ? sourceEnd : fallbackEnd;
+    const sessionItems = [...state.playbackLines, ...state.lines];
+    const nextStart = sessionItems.reduce((next, entry) => {
+      if (entry.occurrence_id === item.occurrence_id || entry.session_id !== item.session_id) return next;
+      const time = Number(entry.source_start_time);
+      return Number.isFinite(time) && time > start + 0.001 ? Math.min(next, time) : next;
+    }, Infinity);
+    const windowEnd = Math.min(capturedEnd, nextStart);
+    const windowMs = Math.round((windowEnd - start) * 1000);
+    const actualMs = Number(take.actual_duration_ms);
+    if (!Number.isFinite(windowMs) || windowMs < 100 || !Number.isFinite(actualMs) || actualMs <= 0) {
+      hint.textContent = "Não consegui estimar a janela desta fala. Defina a velocidade manualmente entre 0,5× e 2×.";
+      return;
+    }
+    if (actualMs <= windowMs * 0.97) {
+      hint.textContent = `O take atual (${(actualMs / 1000).toFixed(2)} s) já cabe na janela estimada (${(windowMs / 1000).toFixed(2)} s). Se ainda houver corte, tente um pequeno ajuste manual.`;
+      return;
+    }
+    const originalSpeed = Number(take.speed_used) || Number($("#dubSpeed").value) || 1;
+    const requested = originalSpeed * actualMs / (windowMs * 0.95);
+    const suggested = Math.min(2, Math.max(0.5, Math.ceil(requested * 20) / 20));
+    input.value = suggested.toFixed(2);
+    hint.textContent = requested > 2
+      ? `A estimativa pede ${requested.toFixed(2)}×, acima do limite. Coloquei o máximo de 2×; talvez ainda corte.`
+      : `Sugestão ${suggested.toFixed(2)}× para a janela de ${(windowMs / 1000).toFixed(2)} s. É uma estimativa; ajuste ouvindo o novo take.`;
   }
 
   function fillStudio(item) {
@@ -1057,6 +1791,7 @@
     setLineSaveStatus("Salvo automaticamente", "saved");
     $("#dubSourceText").value = item.source_text || "";
     $("#dubText").value = item.dub_text || item.source_text || "";
+    resetSingleTakeSpeed(item);
     $("#dubStudioCharacter").value = item.character_id || "";
     applyStudioCharacterColor(state.characters.find((entry) => entry.character_id === item.character_id));
     $("#dubEmotion").value = item.emotion || "normal";
@@ -1071,10 +1806,19 @@
     notice.textContent = conflicts.length ? `Possível repetição temporal em ${conflicts.length} outra(s) ocorrência(s). Revise o vínculo; nada foi mesclado.` : "";
     notice.classList.toggle("hidden", !conflicts.length);
     const character = state.characters.find((entry) => entry.character_id === item.character_id);
-    renderProfileOptions(item.voice_profile_id || "");
-    const chosenProfile = findProfile($("#dubVoiceSelect").value);
-    if (chosenProfile) renderProfileEditor(chosenProfile, character);
-    else renderProfileEditor(null, character);
+    const requestedProfileId = item.voice_profile_id || "";
+    const profileSelect = $("#dubVoiceSelect");
+    const optionExists = [...profileSelect.options].some((option) => option.value === requestedProfileId);
+    const chosenProfile = findProfile(requestedProfileId);
+    const editorOwnerId = chosenProfile?.character_id || character?.character_id || "";
+    const editorContextChanged = state.editingProfileId !== (chosenProfile?.voice_profile_id || "")
+      || $("#dubVoiceCharacterId").value !== editorOwnerId;
+    if (profileDraftDirty && editorContextChanged) {
+      renderProfileOptions(state.editingProfileId);
+    } else {
+      if (profileSelect.value !== requestedProfileId || !optionExists) renderProfileOptions(requestedProfileId);
+      if (editorContextChanged) renderProfileEditor(chosenProfile, character);
+    }
     updateGenerateEnabled();
   }
 
@@ -1092,7 +1836,7 @@
       : !character.name_verified ? "Confirme o nome do personagem primeiro."
         : !profile ? mode === "design" ? "Defina atributos, salve o perfil e confirme a autorização." : hasRoiAudio(character) ? "O áudio da ROI será preparado ao salvar o perfil; confirme a autorização." : "Anexe um áudio autorizado e confirme a autorização ao salvar."
           : profile.active === false ? "Este perfil está inativo."
-            : ready && profile.provider_voice_key === "dubsync:design-candidate" ? `${profile.name} · voz oficial salva; a identidade será reutilizada nos takes.`
+            : ready && profile.provider_voice_key === "dubsync:design-candidate" ? `${profile.name} · voz oficial escolhida; perfil Gerar voz pronto.`
               : ready ? `${profile.name} · áudio autorizado e aprovado.`
                 : mode === "design" && profile.voice_mode !== "design" ? "Salve o perfil no modo Gerar voz antes de criar candidatos."
                   : mode === "design" && !$("#dubProfileAuthorized").checked ? "Confirme a autorização antes de gerar candidatos."
@@ -1115,8 +1859,10 @@
       approve.type = "button";
       approve.addEventListener("click", async () => {
         try {
-          await request(`/voice-references/${encodeURIComponent(reference.reference_id)}/approve`, { method: "POST", body: JSON.stringify({ approved: true }) });
-          await loadAll();
+          const approved = await request(`/voice-references/${encodeURIComponent(reference.reference_id)}/approve`, { method: "POST", body: JSON.stringify({ approved: true }) });
+          const latest = storeVoiceProfile({ ...profile, reference: approved,
+            ready: Boolean(profile.active && profile.use_authorized && profile.voice_mode !== "design" && approved.normalized_path) }, { refreshViews: false });
+          if (latest) refreshVoiceProfileStatus(latest.voice_profile_id);
           toast("Áudio aprovado. O perfil está pronto para teste e geração.");
         } catch (error) { toast(error.message, true); }
       });
@@ -1136,20 +1882,24 @@
     const profile = findProfile(profileId);
     const editorialReady = item && ["accepted", "corrected"].includes(item.editorial_status);
     const activeTake = item?.takes?.[0]?.status;
-    const busy = activeTake === "queued" || activeTake === "generating";
+    const busy = ["queued", "generating", "generated", "publishing", "review"].includes(activeTake);
     const button = $("#dubGenerateTake");
     button.disabled = Boolean(busy || !(item && profile?.ready && character?.name_verified && (editorialReady || $("#dubManualOverride").checked)));
-    button.innerHTML = busy ? `<span class="dub-inline-spinner" aria-hidden="true"></span> ${activeTake === "queued" ? "Na fila" : "Gerando…"}` : "✦ Gerar take";
+    button.innerHTML = busy ? `<span class="dub-inline-spinner" aria-hidden="true"></span> ${activeTake === "queued" ? "Na fila" : ["generated", "publishing", "review"].includes(activeTake) ? "Sincronizando…" : "Gerando…"}` : "✦ Gerar take";
+  }
+
+  function ensureDubbingVideoSession(sessionId) {
+    const video = $("#dubPreviewVideo"), url = `/api/sessions/${encodeURIComponent(sessionId)}/video?project_id=${encodeURIComponent(window.DUBSYNC_PROJECT_ID||"")}`;
+    if (video.dataset.sessionId !== sessionId) {
+      video.pause(); video.src = url; video.dataset.sessionId = sessionId; video.load();
+    }
+    $("#dubVideoPlaceholder").classList.add("hidden"); video.classList.remove("hidden");
+    return video;
   }
 
   function setupVideo(item) {
-    const video = $("#dubPreviewVideo"), url = `/api/sessions/${encodeURIComponent(item.session_id)}/video?project_id=${encodeURIComponent(window.DUBSYNC_PROJECT_ID||"")}`;
-    if (video.dataset.sessionId !== item.session_id) {
-      video.pause(); video.src = url; video.dataset.sessionId = item.session_id; video.load();
-    }
+    const video = ensureDubbingVideoSession(item.session_id);
     video.dataset.targetTime = item.source_start_time;
-    $("#dubVideoPlaceholder").classList.add("hidden");
-    video.classList.remove("hidden");
     setText("#dubTimeStart", fmtTime(item.source_start_time));
     setText("#dubTimeEnd", fmtTime(item.source_end_time));
     setText("#dubDurationDelta", `Alvo ${fmtDuration(item.target_duration_ms)}`);
@@ -1189,6 +1939,71 @@
     try { localStorage.setItem(DUB_TIMELINE_VIEW_KEY, JSON.stringify(dubTimelineViews)); } catch { /* view persistence is optional */ }
   }
 
+  function prepareNavigation(context) {
+    if (context?.sessionId) {
+      const sessionId = String(context.sessionId);
+      if (state.selectedSessionId && state.selectedSessionId !== sessionId) {
+        state.timelineSelectedOccurrenceIds.clear(); resetBatchSelection();
+      }
+      pendingSharedNavigation = { ...context, sessionId };
+    }
+  }
+
+  function getNavigationState() {
+    const sessionId = state.selectedSessionId || $("#dubSessionFilter")?.value || "";
+    if (!sessionId) return null;
+    const video = $("#dubPreviewVideo"), session = state.overview?.sessions?.find((item) => item.session_id === sessionId);
+    const bounds = getDubTimelineBounds(), currentTime = Number(video?.currentTime);
+    const videoMatches = video?.dataset.sessionId === sessionId && Number.isFinite(currentTime)
+      && currentTime >= bounds.start - .5 && currentTime <= bounds.end + .5;
+    const playhead = videoMatches ? currentTime : Number(state.selectedLine?.source_start_time ?? session?.source_start ?? bounds.start);
+    return { sessionId, playhead, timelineStart: dubTimelineRange.start, timelineSpan: dubTimelineRange.span };
+  }
+
+  function waitForDubbingVideo(video) {
+    if (video.readyState >= 1 && Number.isFinite(video.duration)) return Promise.resolve(true);
+    return new Promise((resolve) => {
+      let timer;
+      const finish = (ready) => { clearTimeout(timer); video.removeEventListener("loadedmetadata", onReady); video.removeEventListener("error", onError); resolve(ready); };
+      const onReady = () => finish(true), onError = () => finish(false);
+      video.addEventListener("loadedmetadata", onReady, { once: true }); video.addEventListener("error", onError, { once: true });
+      timer = window.setTimeout(() => finish(false), 12000);
+    });
+  }
+
+  async function applySharedNavigation(context) {
+    const sessionId = String(context?.sessionId || "");
+    if (!sessionId || sessionId !== state.selectedSessionId) return;
+    const requestedTime = Number(context.playhead);
+    const source = state.playbackLinesSessionId === sessionId ? state.playbackLines : state.lines;
+    const items = source.filter((item) => item.session_id === sessionId && item.editorial_status !== "discarded");
+    const nearest = Number.isFinite(requestedTime) ? items.reduce((best, item) => {
+      const start = Number(item.source_start_time) || 0, end = Number(item.source_end_time) || start;
+      const distance = requestedTime < start ? start - requestedTime : requestedTime > end ? requestedTime - end : 0;
+      if (!best || distance < best.distance) return { item, distance };
+      return best;
+    }, null)?.item : null;
+    if (nearest && nearest.occurrence_id !== state.selectedLine?.occurrence_id) await selectLine(nearest.occurrence_id, false);
+    const video = ensureDubbingVideoSession(sessionId);
+    if (!await waitForDubbingVideo(video)) { toast("O bloco foi selecionado, mas o vídeo não carregou para sincronizar o tempo.", true); return; }
+    const bounds = getDubTimelineBounds();
+    if (Number.isFinite(Number(context.timelineStart)) && Number.isFinite(Number(context.timelineSpan))) {
+      saveDubTimelineView(clampDubTimelineView(Number(context.timelineStart), Number(context.timelineSpan), bounds));
+    }
+    if (Number.isFinite(requestedTime)) {
+      const target = Math.max(bounds.start, Math.min(bounds.end, Math.min(video.duration, requestedTime)));
+      if (Math.abs(video.currentTime - target) > .025) {
+        await new Promise((resolve) => {
+          let timer;
+          const finish = () => { clearTimeout(timer); video.removeEventListener("seeked", finish); resolve(); };
+          video.addEventListener("seeked", finish, { once: true });
+          timer = window.setTimeout(finish, 2500); video.currentTime = target;
+        });
+      }
+    }
+    renderDubDialogueTimeline(); updateDubbingBlockCursor(); updateDubTimelineCursor();
+  }
+
   function updateDubTimelineCursor() {
     const cursor = $("#dubDialogueCursor"), video = $("#dubPreviewVideo");
     if (!cursor) return;
@@ -1215,6 +2030,7 @@
       ticks.append(label);
     }
     track.querySelectorAll(".dub-dialogue-pin,.dub-timeline-selection-rect").forEach((node) => node.remove());
+    timelinePinByOccurrence.clear();
     const items = dubTimelineItems();
     for (const item of items) {
       const time = Number(item.source_start_time);
@@ -1227,6 +2043,7 @@
       pin.title = `#${item.event?.sequence ?? "—"} · ${item.character_name || "Sem personagem"} · ${fmtTime(time)}\n${item.dub_text || item.source_text || ""}\nClique para selecionar; duplo clique para ir ao início.`;
       pin.setAttribute("aria-label", `Diálogo ${item.event?.sequence ?? ""}, ${item.character_name || "sem personagem"}, ${fmtTime(time)}`);
       track.append(pin);
+      timelinePinByOccurrence.set(item.occurrence_id, pin);
     }
     const video = $("#dubPreviewVideo"), cursor = $("#dubDialogueCursor");
     if (Number.isFinite(Number(video?.currentTime))) { cursor.hidden = false; cursor.style.left = `${Math.max(0, Math.min(100, (Number(video.currentTime) - view.start) / view.span * 100))}%`; }
@@ -1264,6 +2081,11 @@
 
   function selectedDubTimelineItems() {
     return dubTimelineItems().filter((item) => state.timelineSelectedOccurrenceIds.has(item.occurrence_id));
+  }
+
+  function takeAudioUrl(takeId) {
+    const params = new URLSearchParams({ project_id: window.DUBSYNC_PROJECT_ID || "" });
+    return `/api/dubbing/takes/${encodeURIComponent(takeId)}/audio?${params}`;
   }
 
   function setDubTimelineSelection(ids, anchor = "") {
@@ -1332,7 +2154,7 @@
       const promptText = events.length > 1
         ? (permanent ? "Excluir definitivamente " : "Descartar ") + events.length + " diálogos selecionados?"
         : permanent ? "Excluir este diálogo definitivamente? Os dados de dublagem não compartilhados também serão apagados." : "Descartar este diálogo e preservá-lo para revisão?";
-      if (!confirm(promptText)) return;
+      if (settings.review?.confirm_dialogue_removal !== false && !confirm(promptText)) return;
       for (const event of events) {
         const route = permanent ? "/api/events/" + encodeURIComponent(event.event_id) : "/api/events/" + encodeURIComponent(event.event_id) + "/review/discard";
         await requestCapture(route, permanent ? { method: "DELETE" } : { method: "POST", body: "{}" });
@@ -1438,11 +2260,15 @@
 
   async function renderTakes(takes) {
     const list = $("#dubTakeList"); list.replaceChildren();
-    setText("#dubTakeCount", `${takes.length} take${takes.length === 1 ? "" : "s"}`);
-    if (!takes.length) { list.append(make("div", "dub-empty-mini", "Nenhum take foi gerado para esta ocorrência.")); clearWaveform(); return; }
     const ordered = [...takes].sort((a, b) => Number(b.version) - Number(a.version));
-    for (const take of ordered) {
+    const current = ordered.find((take) => take.status !== "superseded") || ordered[0];
+    const historyCount = Math.max(0, ordered.length - (current ? 1 : 0));
+    setText("#dubTakeCount", current ? `Áudio atual${historyCount ? ` · ${historyCount} versão(ões) anterior(es) guardada(s)` : ""}` : "Sem áudio");
+    if (!takes.length) { list.append(make("div", "dub-empty-mini", "Nenhum take foi gerado para esta ocorrência.")); clearWaveform(); return; }
+    if (!current) { list.append(make("div", "dub-empty-mini", "Nenhum áudio ativo para esta ocorrência.")); clearWaveform(); return; }
+    for (const take of [current]) {
       const row = make("article", `dub-take-card${take.take_id === state.selectedTakeId ? " selected" : ""}`);
+      row.dataset.takeId = take.take_id;
       const top = make("div", "dub-take-top");
       top.append(make("b", "", `TAKE ${String(take.version).padStart(2, "0")}`));
       top.append(make("span", `dub-status-pill ${take.status}`, labelStatus(take.status)));
@@ -1450,24 +2276,30 @@
       top.append(make("small", deltaClass(take), formatDelta(take)));
       row.append(top);
       if (take.error_message) row.append(make("small", "dub-take-error", take.error_message));
+      if (!take.audio_master_path && ["queued", "generating", "publishing"].includes(take.status)) {
+        row.append(make("small", "dub-empty-mini", "A prévia de áudio ficará disponível quando este take terminar de ser gerado."));
+      }
       if (take.audio_master_path) {
-        const audio = make("audio", "dub-take-audio"); audio.controls = true; audio.preload = "none"; audio.src = `/api/dubbing/takes/${encodeURIComponent(take.take_id)}/audio`;
-        audio.addEventListener("play", () => selectTake(take, takes)); row.append(audio);
+        const audio = make("audio", "dub-take-audio"); audio.controls = true; audio.preload = "none"; audio.src = takeAudioUrl(take.take_id);
+        audio.addEventListener("play", () => void selectTake(take, takes));
+        audio.addEventListener("error", () => toast("Não foi possível carregar este take. Atualize a página e tente novamente.", true));
+        row.append(audio);
       }
       const actions = make("div", "dub-take-actions");
-      const listen = make("button", "button quiet", "▶ Ouvir + revisar"); listen.type = "button"; listen.disabled = !take.audio_master_path;
-      listen.addEventListener("click", () => void selectTake(take, takes)); actions.append(listen);
-      if (["review", "generated", "approved", "rejected"].includes(take.status)) {
-        const approve = make("button", "button confirm", "✓ Aprovar"), reject = make("button", "button danger", "× Rejeitar");
-        approve.type = reject.type = "button";
-        approve.addEventListener("click", () => void reviewTake(take.take_id, "approve"));
-        reject.addEventListener("click", () => void reviewTake(take.take_id, "reject"));
-        actions.append(approve, reject);
-      }
+      const listen = make("button", "button quiet", "▶ Ouvir take"); listen.type = "button"; listen.disabled = !take.audio_master_path;
+      listen.addEventListener("click", async () => {
+        try {
+          await selectTake(take, takes);
+          const preview = $("#dubPreviewAudio");
+          preview.currentTime = 0;
+          await preview.play();
+        } catch (error) { toast(`Não foi possível reproduzir o take: ${error.message}`, true); }
+      }); actions.append(listen);
       row.append(actions); list.append(row);
     }
-    const chosen = ordered.find((take) => take.take_id === state.selectedTakeId) || ordered.find((take) => take.audio_master_path);
-    if (chosen) await selectTake(chosen, takes, false);
+    const chosen = current;
+    if (chosen?.audio_master_path) await selectTake(chosen, takes, false);
+    else clearWaveform();
   }
 
   function deltaClass(take) {
@@ -1484,52 +2316,176 @@
   async function selectTake(take, allTakes, refreshRows = true) {
     state.selectedTakeId = take.take_id;
     const audio = $("#dubPreviewAudio");
-    audio.pause(); audio.src = `/api/dubbing/takes/${encodeURIComponent(take.take_id)}/audio`; audio.load();
+    audio.pause(); audio.src = takeAudioUrl(take.take_id); audio.load();
     $("#dubPlaySynced").disabled = false; $("#dubAudioOnly").disabled = false;
     setText("#dubDurationDelta", `${take.actual_duration_ms ? fmtDuration(take.actual_duration_ms) : "—"} · ${formatDelta(take)}`);
-    if (refreshRows) await renderTakes(allTakes.map((item) => item));
+    if (refreshRows) $("#dubTakeList").querySelectorAll(".dub-take-card").forEach((row) =>
+      row.classList.toggle("selected", row.dataset.takeId === take.take_id));
     drawWaveform(audio.src);
   }
 
   function clearWaveform() {
+    const audio = $("#dubPreviewAudio");
+    audio.pause();
+    audio.removeAttribute("src");
+    audio.load();
+    state.selectedTakeId = "";
     const canvas = $("#dubWaveformCanvas"), context = canvas.getContext("2d");
     context.clearRect(0, 0, canvas.width, canvas.height);
     $("#dubWaveformEmpty").classList.remove("hidden");
     $("#dubPlaySynced").disabled = true; $("#dubAudioOnly").disabled = true;
+    setText("#dubDurationDelta", "Áudio indisponível");
   }
 
   async function drawWaveform(url) {
     const canvas = $("#dubWaveformCanvas"), context = canvas.getContext("2d");
+    const revision = ++waveformRenderRevision;
     context.clearRect(0, 0, canvas.width, canvas.height);
     $("#dubWaveformEmpty").classList.remove("hidden");
     try {
-      const response = await fetch(url); if (!response.ok) return;
-      const bytes = await response.arrayBuffer();
-      const AudioCtx = window.AudioContext || window.webkitAudioContext; if (!AudioCtx) return;
-      const audioContext = new AudioCtx();
-      const decoded = await audioContext.decodeAudioData(bytes.slice(0));
-      const samples = decoded.getChannelData(0), stride = Math.max(1, Math.floor(samples.length / canvas.width));
+      let waveform = waveformCache.get(url);
+      if (waveform) {
+        waveformCache.delete(url);
+        waveformCache.set(url, waveform);
+      } else {
+        let pending = waveformPending.get(url);
+        if (!pending) {
+          pending = (async () => {
+            const response = await fetch(url); if (!response.ok) throw new Error(`HTTP ${response.status}`);
+            const bytes = await response.arrayBuffer();
+            const AudioCtx = window.AudioContext || window.webkitAudioContext; if (!AudioCtx) return null;
+            const audioContext = new AudioCtx();
+            try {
+              const decoded = await audioContext.decodeAudioData(bytes.slice(0));
+              const samples = decoded.getChannelData(0), bins = Math.max(512, Math.min(1600, canvas.width));
+              const peaks = new Float32Array(bins), stride = Math.max(1, Math.ceil(samples.length / bins));
+              for (let bin = 0; bin < bins; bin++) {
+                const end = Math.min(samples.length, (bin + 1) * stride);
+                for (let index = bin * stride; index < end; index++) peaks[bin] = Math.max(peaks[bin], Math.abs(samples[index]));
+              }
+              return { peaks, duration: decoded.duration };
+            } finally { await audioContext.close().catch(() => {}); }
+          })();
+          waveformPending.set(url, pending);
+        }
+        try { waveform = await pending; }
+        finally { if (waveformPending.get(url) === pending) waveformPending.delete(url); }
+        if (!waveform) return;
+        waveformCache.set(url, waveform);
+        while (waveformCache.size > 48) waveformCache.delete(waveformCache.keys().next().value);
+      }
+      if (revision !== waveformRenderRevision || url !== $("#dubPreviewAudio").src) return;
+      const { peaks, duration } = waveform;
       context.strokeStyle = "#548fff"; context.lineWidth = 1;
       context.beginPath();
       for (let x = 0; x < canvas.width; x++) {
-        let peak = 0; const start = x * stride;
-        for (let j = start; j < Math.min(samples.length, start + stride); j++) peak = Math.max(peak, Math.abs(samples[j]));
+        const peak = peaks[Math.min(peaks.length - 1, Math.floor(x * peaks.length / canvas.width))];
         const amplitude = Math.max(1, peak * canvas.height * 0.46), middle = canvas.height / 2;
         context.moveTo(x + .5, middle - amplitude); context.lineTo(x + .5, middle + amplitude);
       }
       context.stroke();
       $("#dubWaveformEmpty").classList.add("hidden");
-      setText("#dubPreviewClock", `00:00 / ${fmtTime(decoded.duration)}`);
-      await audioContext.close();
+      setText("#dubPreviewClock", `00:00 / ${fmtTime(duration)}`);
     } catch { /* The audio control remains available when waveform decoding is unavailable. */ }
+  }
+
+  function applyTakeReviewUpdate(takeId, updatedTake) {
+    let previousStatus = "";
+    const syncTake = (line) => {
+      const take = line?.takes?.find((item) => item.take_id === takeId);
+      if (take) {
+        if (!previousStatus) previousStatus = take.status;
+        Object.assign(take, updatedTake);
+        updateLineRowStatus(line);
+      }
+    };
+    state.lines.forEach(syncTake);
+    state.playbackLines.forEach(syncTake);
+    syncTake(state.selectedLine);
+    const summary = state.overview?.summary;
+    if (summary && previousStatus !== updatedTake.status) {
+      if (previousStatus === "review") summary.review = Math.max(0, Number(summary.review || 0) - 1);
+      if (updatedTake.status === "review") summary.review = Number(summary.review || 0) + 1;
+      const generated = new Set(["generated", "review", "approved"]);
+      if (generated.has(previousStatus) && !generated.has(updatedTake.status)) summary.generated = Math.max(0, Number(summary.generated || 0) - 1);
+      if (!generated.has(previousStatus) && generated.has(updatedTake.status)) summary.generated = Number(summary.generated || 0) + 1;
+      if (previousStatus === "approved") summary.approved = Math.max(0, Number(summary.approved || 0) - 1);
+      if (updatedTake.status === "approved") summary.approved = Number(summary.approved || 0) + 1;
+      if (previousStatus === "error") summary.errors = Math.max(0, Number(summary.errors || 0) - 1);
+      if (updatedTake.status === "error") summary.errors = Number(summary.errors || 0) + 1;
+      renderSummary(summary);
+    }
+    refreshLineReviewMetric();
+    const takeCard = [...$("#dubTakeList").querySelectorAll(".dub-take-card")]
+      .find((card) => card.dataset.takeId === takeId);
+    if (takeCard && updatedTake.status) {
+      const statusPill = takeCard.querySelector(".dub-status-pill");
+      if (statusPill) {
+        statusPill.className = `dub-status-pill ${updatedTake.status}`;
+        statusPill.textContent = labelStatus(updatedTake.status);
+      }
+      const approveButton = takeCard.querySelector(".dub-take-actions .confirm");
+      if (approveButton && updatedTake.status === "approved") {
+        approveButton.textContent = "✓ Aprovado";
+        approveButton.disabled = true;
+        approveButton.title = "Este take já foi aprovado.";
+      }
+    }
   }
 
   async function reviewTake(takeId, action) {
     try {
-      await request(`/takes/${encodeURIComponent(takeId)}/review`, { method: "POST", body: JSON.stringify({ action, note: "" }) });
-      toast(action === "approve" ? "Take aprovado para esta ocorrência." : "Take rejeitado; o histórico foi preservado.");
-      await loadAll();
+      const updatedTake = await request(`/takes/${encodeURIComponent(takeId)}/review`, { method: "POST", body: JSON.stringify({ action, note: "" }) });
+      applyTakeReviewUpdate(takeId, updatedTake);
+      if (state.selectedLine?.occurrence_id) state.selectedOccurrenceIds.delete(state.selectedLine.occurrence_id);
+      updateSelectionCount();
+      const autoPublish = updatedTake.runtime_publish?.status === "queued"
+        ? " A sincronização automática com o jogo foi enfileirada."
+        : updatedTake.runtime_publish?.status === "not_ready"
+          ? ` ${updatedTake.runtime_publish.message}` : "";
+      toast((action === "approve" ? "Take aprovado para esta ocorrência." : "Take rejeitado; o histórico foi preservado.") + autoPublish);
+      await refreshQueue(false);
+      void refreshDubbingBlockPlan(true);
     } catch (error) { toast(error.message, true); }
+  }
+
+  async function approveSelectedTakes() {
+    const visibleSelected = new Set(state.lines.filter((item) => state.selectedOccurrenceIds.has(item.occurrence_id))
+      .map((item) => item.occurrence_id));
+    if (!visibleSelected.size) { toast("Marque as falas que deseja aprovar.", true); return; }
+    const button = $("#dubApproveSelected");
+    button.disabled = true;
+    try {
+      const fresh = await request(`/lines?session_id=${encodeURIComponent(state.selectedSessionId)}&status=all`);
+      const candidates = (fresh.items || []).filter((item) => visibleSelected.has(item.occurrence_id))
+        .map((item) => ({ item, take: item.takes[0] }))
+        .filter(({ take }) => take?.status === "review" && take.audio_master_path);
+      if (!candidates.length) { toast("Nenhuma fala marcada tem um take recente aguardando revisão.", true); return; }
+      if (!confirm(`Aprovar ${candidates.length} take(s) das falas marcadas? Confirme que ouviu cada áudio e que o texto, a voz e a qualidade estão corretos.`)) return;
+      let approved = 0;
+      let autoPublishQueued = false;
+      let autoPublishMessage = "";
+      const errors = [];
+      for (const { item, take } of candidates) {
+        try {
+          const updatedTake = await request(`/takes/${encodeURIComponent(take.take_id)}/review`, {
+            method: "POST", body: JSON.stringify({ action: "approve", note: "" }),
+          });
+          applyTakeReviewUpdate(take.take_id, updatedTake);
+          autoPublishQueued ||= updatedTake.runtime_publish?.status === "queued";
+          if (updatedTake.runtime_publish?.status === "not_ready") autoPublishMessage = updatedTake.runtime_publish.message || "";
+          state.selectedOccurrenceIds.delete(item.occurrence_id);
+          updateSelectionCount();
+          approved++;
+        } catch (error) { errors.push(`${item.dub_text || item.occurrence_id}: ${error.message}`); }
+      }
+      await refreshQueue(false);
+      void refreshDubbingBlockPlan(true);
+      toast(errors.length
+        ? `${approved} take(s) aprovados; ${errors.length} falharam. Revise os restantes. ${errors[0]}`
+        : `${approved} take(s) aprovados.${autoPublishQueued ? " Sincronização automática com o jogo enfileirada." : autoPublishMessage ? ` ${autoPublishMessage}` : ""}`, Boolean(errors.length));
+    } catch (error) { toast(error.message, true); }
+    finally { updateSelectionCount(); }
   }
 
   async function refreshProvider() {
@@ -1575,8 +2531,9 @@
     const batch = queue.batch;
     const progress = batch ? Math.min(100, Number(batch.percent) || 0) : 0;
     $("#dubBatchProgress").style.width = `${progress}%`;
+    const publication = batch?.publication || {};
     setText("#dubQueuePercent", batch
-      ? `${batch.finished} / ${batch.total} processadas · ${progress}% · concluídas ${batch.completed} · gerando ${batch.generating} · aguardando ${batch.queued} · erros ${batch.errors} · canceladas ${batch.cancelled}`
+      ? `${batch.finished} / ${batch.total} geradas · ${progress}% · no jogo ${publication.ready || 0} · sincronizando ${publication.pending || 0} · falhas ao enviar ${publication.errors || 0} · gerando ${batch.generating} · aguardando ${batch.queued} · erros de geração ${batch.errors} · canceladas ${batch.cancelled}`
       : total ? `Geração individual · ${counts.generating || 0} em geração · ${counts.queued || 0} aguardando · ${counts.error || 0} erros`
         : "Nenhum lote recente");
     setText("#dubBatchGenerated", batch ? batch.completed : Number($("#dubStatGenerated").textContent) || 0);
@@ -1584,8 +2541,10 @@
     setText("#dubBatchQueued", batch ? batch.queued : counts.queued || 0);
     setText("#dubBatchReview", batch ? batch.generating : counts.generating || 0);
     const statePill = $("#dubQueueState");
-    statePill.textContent = queue.paused ? "Pausada" : counts.generating ? "Em geração" : counts.queued ? "Na fila" : counts.error ? "Requer atenção" : "Parada";
-    statePill.className = `dub-status-pill ${queue.paused ? "waiting" : counts.generating ? "generating" : counts.error ? "failed" : counts.queued ? "queued" : "waiting"}`;
+    const publishing = Number(publication.pending || 0) > 0;
+    const publicationErrors = Number(publication.errors || 0) > 0;
+    statePill.textContent = queue.paused ? "Pausada" : counts.generating ? "Em geração" : counts.queued ? "Na fila" : publishing ? "Sincronizando jogo" : counts.error || publicationErrors ? "Requer atenção" : "Parada";
+    statePill.className = `dub-status-pill ${queue.paused ? "waiting" : counts.generating ? "generating" : counts.error || publicationErrors ? "failed" : publishing ? "publishing" : counts.queued ? "queued" : "waiting"}`;
     $("#dubPauseQueue").textContent = queue.paused ? "▶ Retomar fila" : "Ⅱ Pausar fila";
     const list = $("#dubQueueList"); list.replaceChildren();
     const items = queue.items || [];
@@ -1594,7 +2553,9 @@
       const row = make("div", "dub-queue-item");
       row.append(make("span", `dub-queue-dot ${job.status}`, "●"));
       row.append(make("span", "", `${job.text.slice(0, 52)}${job.text.length > 52 ? "…" : ""}`));
-      const itemStatus = { queued: "◷ Aguardando", generating: "◌ Gerando", completed: "✓ Gerado · revisar", error: "⚠ Erro", cancelled: "○ Cancelado" }[job.status] || labelStatus(job.status);
+      const itemStatus = job.status === "completed"
+        ? ({ ready: "✓ Pronta no jogo", approved: "✓ Pronta no jogo", publishing: "◌ Sincronizando com o jogo", generated: "◌ Aguardando sincronização", publish_error: "⚠ Falha ao enviar ao jogo" }[job.take_status] || "✓ Geração concluída")
+        : ({ queued: "◷ Aguardando", generating: "◌ Gerando", error: "⚠ Erro", cancelled: "○ Cancelado" }[job.status] || labelStatus(job.status));
       row.append(make("small", "", `${itemStatus}${job.status === "error" ? ` · ${job.attempt}/${job.max_attempts}` : ""}`));
       list.append(row);
     }
@@ -1630,6 +2591,7 @@
     if (!characters.length) list.append(make("div", "dub-empty-mini", query ? "Nenhum personagem encontrado." : "Nenhum personagem ativo cadastrado na ROI da Captura."));
     for (const character of characters) {
       const row = make("div", `dub-character-card${character.character_id === state.selectedCharacterId ? " selected" : ""}`);
+      row.dataset.characterId = character.character_id;
       row.setAttribute("role", "option"); row.setAttribute("aria-selected", String(character.character_id === state.selectedCharacterId));
       const avatar = characterAvatar(character);
       const info = make("span", "dub-character-info"), characterName = make("b", "", character.display_name || character.name);
@@ -1640,15 +2602,7 @@
       const main = make("button", "dub-character-main"); main.type = "button"; main.setAttribute("aria-label", `Selecionar ${character.display_name || character.name}`);
       main.append(avatar, info, status); main.addEventListener("click", () => { state.selectedCharacterId = character.character_id; renderCharacters(); renderCharacterDetail(character); });
       const assign = make("select", "dub-character-voice-select"); assign.setAttribute("aria-label", `Perfil vocal de ${character.display_name || character.name}`);
-      assign.disabled = !character.name_verified;
-      if (!character.name_verified) assign.title = "Confira a identidade do personagem antes de associar uma voz.";
-      assign.append(make("option", "", "Sem perfil"));
-      for (const profile of allProfiles().filter((item) => item.active)) {
-        const option = make("option", "", `${profile.name} · ${profile.owner_name}`);
-        option.value = profile.voice_profile_id;
-        assign.append(option);
-      }
-      assign.value = character.default_voice_profile_id || "";
+      fillCharacterVoiceProfileSelect(assign, character);
       assign.addEventListener("click", (event) => event.stopPropagation());
       assign.addEventListener("change", async (event) => {
         event.stopPropagation();
@@ -1658,10 +2612,20 @@
             method: "PUT", body: JSON.stringify({ voice_profile_id: assign.value || null }),
           });
           const reused = result.already_used_by || [];
-          await loadAll();
+          character.default_voice_profile_id = result.voice_profile_id || null;
+          const assignedProfile = applyCharacterVoiceAssignment(character, result.voice_profile_id);
           state.selectedCharacterId = character.character_id;
-          const updated = state.characters.find((item) => item.character_id === character.character_id);
-          renderCharacters(); if (updated) renderCharacterDetail(updated);
+          assign.disabled = !character.name_verified;
+          refreshCharacterVoiceStatus(character);
+          renderCharacterDetail(character);
+          if (state.selectedLine?.character_id === character.character_id) {
+            if (profileDraftDirty) renderProfileOptions(state.editingProfileId);
+            else {
+              renderProfileOptions(assignedProfile?.voice_profile_id || "");
+              renderProfileEditor(assignedProfile, character);
+            }
+          }
+          updateGenerateEnabled();
           toast(reused.length ? `Perfil associado. A mesma voz já está em uso por ${reused.join(", ")}.` : "Perfil vocal associado e salvo instantaneamente.");
         } catch (error) { toast(error.message, true); assign.disabled = false; }
       });
@@ -1699,7 +2663,7 @@
       row.append(make("span", `dub-profile-indicator ${profile.ready ? "ready" : "failed"}`, profile.ready ? "●" : "○"));
       const detail = make("span", "dub-profile-row-info"); detail.append(make("b", "", profile.name));
       detail.append(make("small", "", `${profile.voice_mode === "clone" ? "clonagem" : "voz desenhada"} · ${profile.reference ? `${fmtDuration(profile.reference.duration_ms)} · ${labelStatus(profile.reference.quality_status)}` : "sem referência"}`));
-      const editProfile = make("button", "button quiet", "Editar"); editProfile.type = "button"; editProfile.addEventListener("click", () => { renderProfileOptions(profile.voice_profile_id); renderProfileEditor(findProfile(profile.voice_profile_id), character); $("#dubProfileName").focus(); });
+      const editProfile = make("button", "button quiet", "Editar"); editProfile.type = "button"; editProfile.addEventListener("click", () => { if (!confirmDiscardProfileDraft()) return; renderProfileOptions(profile.voice_profile_id); renderProfileEditor(findProfile(profile.voice_profile_id), character); $("#dubProfileName").focus(); });
       row.append(detail, editProfile); box.append(row);
     }
     const add = make("button", "button quiet", "+ Novo perfil OmniVoice"); add.type = "button"; add.addEventListener("click", () => startNewVoiceProfile(character)); box.append(add);
@@ -1744,7 +2708,7 @@
   async function confirmCharacterIdentity(character = actionCharacter()) {
     if (!character) return;
     try {
-      await request(`/characters/${encodeURIComponent(character.character_id)}`, {
+      const updated = await request(`/characters/${encodeURIComponent(character.character_id)}`, {
         method: "PUT",
         body: JSON.stringify({
           name: character.name, display_name: character.display_name || character.name,
@@ -1754,13 +2718,14 @@
       });
       $("#dubCharacterActionsDialog").close();
       state.selectedCharacterId = character.character_id;
-      await loadAll(true);
+      storeCharacter(updated);
       toast("Identidade conferida. Agora você pode associar um perfil vocal.");
     } catch (error) { toast(error.message, true); }
   }
 
   function openCharacterVoiceProfile(character = actionCharacter()) {
     if (!character) return;
+    if (!confirmDiscardProfileDraft()) return;
     $("#dubCharacterActionsDialog").close();
     if (!character.name_verified) {
       openCharacterActions(character);
@@ -1792,6 +2757,7 @@
   function startNewVoiceProfile(character = currentStudioCharacter()) {
     if (!character) { toast("Selecione um personagem antes de criar o perfil vocal.", true); return; }
     if (!character.name_verified) { openCharacterActions(character); toast("Confira o personagem nas ações do card antes de criar um perfil de voz.", true); return; }
+    if (!confirmDiscardProfileDraft()) return;
     renderProfileOptions("");
     $("#dubVoiceSelect").value = "";
     state.profilePresetKey = "";
@@ -1805,7 +2771,9 @@
     button.classList.remove("saving", "saved");
     button.classList.add("saved");
     button.textContent = "✓ Perfil salvo";
-    setTimeout(() => { button.classList.remove("saved"); button.textContent = "Salvar perfil"; button.disabled = false; }, 1900);
+    const status = $("#dubProfileSaveStatus");
+    if (status) { status.textContent = "Perfil salvo."; status.className = "saved"; }
+    setTimeout(() => { button.classList.remove("saved"); button.textContent = "Salvar perfil"; updateProfileSaveState(); }, 1900);
   }
 
   async function saveInlineVoiceProfile() {
@@ -1820,8 +2788,10 @@
     const body = {
       character_id: characterId, name, language: "pt-BR", voice_mode: $("#dubLocalProfileMode").value,
       default_speed: Number($("#dubSpeed").value || 1),
+      voice_effect: $("#dubVoiceEffect").value,
       default_instruct: $("#dubLocalProfileMode").value === "design" ? voiceDesignInstruction()
         : findProfile(profileId)?.provider_voice_key === "dubsync:design-candidate" ? findProfile(profileId).default_instruct : "",
+      default_direction: $("#dubInstruction").value.trim(),
       use_authorized: $("#dubProfileAuthorized").checked,
       preset_key: $("#dubLocalProfileMode").value === "design" ? state.profilePresetKey || null : null,
       reference_text: $("#dubProfileReferenceText").value.trim() || null,
@@ -1832,6 +2802,10 @@
       let saved = await request(`/voice-profiles${profileId ? `/${encodeURIComponent(profileId)}` : ""}`, {
         method: profileId ? "PUT" : "POST", body: JSON.stringify(body),
       });
+      if (state.referenceRemoveRequested && saved.voice_profile_id) {
+        saved = await request(`/voice-profiles/${encodeURIComponent(saved.voice_profile_id)}/reference`, { method: "DELETE" });
+        state.referenceRemoveRequested = false;
+      }
       const file = $("#dubReferenceFile").files[0];
       if (file && saved.voice_mode === "clone") {
         const params = new URLSearchParams({ filename: file.name, reference_text: $("#dubProfileReferenceText").value });
@@ -1845,11 +2819,16 @@
         state.referenceUploadUrl = "";
       }
       state.selectedCharacterId = characterId;
-      await loadAll();
-      renderProfileOptions(saved.voice_profile_id);
-      const latest = findProfile(saved.voice_profile_id) || saved;
+      storeVoiceProfile(saved, { refreshViews: false });
+      if (!profileId && saved.voice_mode === "design") {
+        state.candidateProfileId = saved.voice_profile_id;
+        state.candidateLoadedProfileId = saved.voice_profile_id;
+        state.candidateItems = [];
+        state.designCandidateNodes.clear();
+        $("#dubCandidateList").replaceChildren(); $("#dubCandidateHistory").classList.add("hidden");
+      }
+      refreshVoiceProfilePanel(saved.voice_profile_id, { select: true });
       const owner = state.characters.find((item) => item.character_id === characterId);
-      renderProfileEditor(latest, owner);
       animateProfileSaved();
       const roiSource = !file && saved.voice_mode === "clone" && saved.provider_voice_key !== "dubsync:design-candidate" && hasRoiAudio(owner);
       toast(file ? "Perfil salvo e áudio carregado. Revise a qualidade do arquivo para liberar a voz."
@@ -1858,8 +2837,10 @@
     } catch (error) {
       toast(error.message, true);
       button.classList.remove("saving"); button.textContent = "Salvar perfil";
+      const status = $("#dubProfileSaveStatus");
+      if (status) { status.textContent = `Falha ao salvar: ${error.message}`; status.className = "error"; }
     } finally {
-      if (!button.classList.contains("saved")) button.disabled = false;
+      if (!button.classList.contains("saved")) updateProfileSaveState();
     }
   }
 
@@ -1868,20 +2849,23 @@
     if (!profile) return;
     const active = !profile.active;
     try {
-      await request(`/voice-profiles/${encodeURIComponent(profile.voice_profile_id)}/active`, { method: "PUT", body: JSON.stringify({ active }) });
-      await loadAll();
-      renderProfileOptions(profile.voice_profile_id); renderProfileEditor(findProfile(profile.voice_profile_id), currentStudioCharacter());
+      const updated = await request(`/voice-profiles/${encodeURIComponent(profile.voice_profile_id)}/active`, { method: "PUT", body: JSON.stringify({ active }) });
+      storeVoiceProfile(updated, { refreshViews: false });
+      refreshVoiceProfileStatus(profile.voice_profile_id, { updateModeControls: true, refreshCandidates: true });
       toast(active ? "Perfil ativado." : "Perfil inativado. Os takes anteriores foram preservados.");
     } catch (error) { toast(error.message, true); }
   }
 
   async function removeVoiceProfile() {
     const profile = findProfile(state.editingProfileId);
+    if (profileDraftDirty && !confirmDiscardProfileDraft()) return;
     if (!profile || !confirm(`Remover o perfil “${profile.name}”? Perfis usados em takes serão inativados para preservar o histórico.`)) return;
     try {
       const result = await request(`/voice-profiles/${encodeURIComponent(profile.voice_profile_id)}`, { method: "DELETE" });
-      await loadAll();
-      renderProfileOptions(""); renderProfileEditor(null, currentStudioCharacter());
+      removeVoiceProfileFromState(profile.voice_profile_id, result.deactivated);
+      renderProfileOptions("");
+      renderProfileEditor(null, currentStudioCharacter());
+      updateGenerateEnabled();
       toast(result.deactivated ? "Perfil inativado; o histórico de takes foi preservado." : "Perfil removido.");
     } catch (error) { toast(error.message, true); }
   }
@@ -1893,6 +2877,7 @@
       if (state.referenceUploadUrl) URL.revokeObjectURL(state.referenceUploadUrl);
       state.referenceUploadUrl = ""; $("#dubReferencePreview").removeAttribute("src"); $("#dubReferencePreview").classList.add("hidden");
       $("#dubRemoveReference").disabled = !profile?.reference;
+      markProfileDraftDirty();
       if (!profile?.reference) {
         setVoiceMode("design");
         updateProfileModeControls();
@@ -1904,15 +2889,14 @@
       return;
     }
     if (!profile?.reference) return;
-    try {
-      const restoredDesign = voiceDesignInstruction();
-      const updated = await request(`/voice-profiles/${encodeURIComponent(profile.voice_profile_id)}/reference`, { method: "DELETE" });
-      await loadAll();
-      const freshProfile = findProfile(updated.voice_profile_id);
-      renderProfileOptions(updated.voice_profile_id);
-      renderProfileEditor({ ...freshProfile, voice_mode: "design", default_instruct: restoredDesign }, currentStudioCharacter());
-      toast("Referência removida. Os atributos de desenho estão ativos; salve o perfil para mudar o modo.");
-    } catch (error) { toast(error.message, true); }
+    state.referenceRemoveRequested = true;
+    state.profilePresetKey = "";
+    setVoiceMode("design");
+    updateProfileModeControls();
+    markProfileDraftDirty();
+    const status = $("#dubProfileReferenceStatus");
+    if (status) status.replaceChildren(make("span", "", "O áudio de referência será removido ao salvar o perfil."));
+    toast("Remoção preparada. Clique em Salvar perfil para aplicar.");
   }
 
   async function replaceRoiAudioReference(file) {
@@ -1943,18 +2927,30 @@
         throw new Error(typeof detail === "string" ? detail : detail?.message || result?.message || `HTTP ${response.status}`);
       }
       state.roiAudioRevision += 1;
-      await loadAll();
-      const owner = state.characters.find((item) => item.character_id === character.character_id);
+      Object.assign(character, {
+        sample_mp3_name: result.sample_mp3_name || file.name,
+        sample_audio_name: result.sample_audio_name || result.sample_mp3_name || file.name,
+        sample_mp3_bytes: result.sample_mp3_bytes || file.size,
+        sample_audio_bytes: result.sample_audio_bytes || result.sample_mp3_bytes || file.size,
+        sample_mp3_available: true, sample_audio_available: true,
+      });
+      refreshCharacterVoiceStatus(character);
+      if (character.character_id === state.selectedCharacterId) renderCharacterDetail(character);
+      const owner = character;
       const latest = findProfile(profileId);
       if (latest?.voice_mode === "clone" && latest.provider_voice_key !== "dubsync:design-candidate") {
         const synced = await syncRoiVoiceReference(latest, owner, { force: true });
         if (!synced) {
-          renderProfileOptions(profileId); renderProfileEditor(findProfile(profileId), owner);
+          refreshVoiceProfileStatus(profileId, { updateModeControls: true });
           return;
         }
         toast(`Áudio do ROI trocado por ${result.sample_mp3_name || file.name}. O perfil foi sincronizado; confirme a autorização antes de gerar takes.`);
+      } else if (profileId) {
+        refreshVoiceProfileStatus(profileId, { updateModeControls: true });
+        toast(`Áudio do ROI trocado por ${result.sample_mp3_name || file.name}.`);
       } else {
-        renderProfileOptions(profileId); renderProfileEditor(latest, owner);
+        refreshCharacterVoiceStatus(character);
+        if (character.character_id === state.selectedCharacterId) renderCharacterDetail(character);
         toast(`Áudio do ROI trocado por ${result.sample_mp3_name || file.name}.`);
       }
     } catch (error) {
@@ -1972,10 +2968,9 @@
     const button = $("#dubUseRoiReference");
     button.disabled = true; button.textContent = "Preparando áudio…";
     try {
-      await request(`/voice-profiles/${encodeURIComponent(profile.voice_profile_id)}/sync-roi-audio`, { method: "POST" });
-      await loadAll();
-      const latest = findProfile(profile.voice_profile_id);
-      renderProfileOptions(profile.voice_profile_id); renderProfileEditor(latest, character);
+      const synced = await request(`/voice-profiles/${encodeURIComponent(profile.voice_profile_id)}/sync-roi-audio`, { method: "POST" });
+      storeVoiceProfile(synced, { refreshViews: false });
+      refreshVoiceProfileStatus(profile.voice_profile_id, { updateModeControls: true });
       toast("Áudio da ROI selecionado. Confirme a autorização da voz para voltar a gerar takes.");
     } catch (error) { toast(error.message, true); }
     finally { button.textContent = "Usar este áudio como voz do perfil"; button.disabled = false; }
@@ -1995,10 +2990,9 @@
     try {
       const response = await fetch(`/api/dubbing/voice-profiles/${encodeURIComponent(profile.voice_profile_id)}/preview`, {
         method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({
-          text, instruct: profile.voice_mode === "design"
-            ? [voiceDesignInstruction(), $("#dubInstruction").value.trim()].filter(Boolean).join(", ")
-            : $("#dubInstruction").value,
+          text, instruct: profile.voice_mode === "design" ? voiceDesignInstruction() : "",
           speed: Number($("#dubSpeed").value || 1),
+          voice_effect: $("#dubVoiceEffect").value,
           generation_settings: generationSettings(),
         }),
       });
@@ -2050,20 +3044,33 @@
 
   async function saveVoiceProfile() {
     const id = $("#dubVoiceProfileId").value, characterId = $("#dubVoiceCharacterId").value;
+    const existingProfile = findProfile(id);
+    const storedGenerationSettings = { ...(existingProfile?.generation_settings_json || {}) };
+    delete storedGenerationSettings.voice_effect;
     const body = {
       character_id: characterId, name: $("#dubVoiceName").value.trim(), language: $("#dubVoiceLanguage").value,
       voice_mode: $("#dubVoiceMode").value, default_speed: Number($("#dubVoiceDefaultSpeed").value),
-      default_instruct: $("#dubVoiceDefaultInstruct").value, use_authorized: $("#dubVoiceAuthorized").checked,
+      default_instruct: $("#dubVoiceDefaultInstruct").value,
+      default_direction: findProfile(id)?.default_direction || "",
+      voice_effect: existingProfile?.voice_effect || "none",
+      generation_settings: storedGenerationSettings,
+      use_authorized: $("#dubVoiceAuthorized").checked,
     };
     try {
-      const saved = await request(`/voice-profiles${id ? `/${encodeURIComponent(id)}` : ""}`, { method: id ? "PUT" : "POST", body: JSON.stringify(body) });
+      let saved = await request(`/voice-profiles${id ? `/${encodeURIComponent(id)}` : ""}`, { method: id ? "PUT" : "POST", body: JSON.stringify(body) });
       const file = $("#dubReferenceFile").files[0];
       if (file && saved.voice_mode === "clone") {
         const params = new URLSearchParams({ filename: file.name, reference_text: $("#dubReferenceText").value });
-        await request(`/voice-profiles/${encodeURIComponent(saved.voice_profile_id)}/references?${params}`, { method: "POST", body: file, headers: { "Content-Type": "application/octet-stream" } });
+        const uploaded = await request(`/voice-profiles/${encodeURIComponent(saved.voice_profile_id)}/references?${params}`, { method: "POST", body: file, headers: { "Content-Type": "application/octet-stream" } });
+        saved = uploaded.profile;
       }
-      $("#dubVoiceDialog").close(); await loadAll();
-      state.selectedCharacterId = characterId; renderCharacterDetail(selectedCharacter());
+      $("#dubVoiceDialog").close();
+      storeVoiceProfile(saved, { refreshViews: false });
+      state.selectedCharacterId = characterId;
+      refreshStoredVoiceProfileControls(state.characters.find((item) => item.character_id === characterId));
+      renderProfileOptions($("#dubVoiceSelect").value || saved.voice_profile_id);
+      if (state.editingProfileId === saved.voice_profile_id) refreshVoiceProfilePanel(saved.voice_profile_id);
+      renderCharacterDetail(selectedCharacter());
       toast(file ? "Perfil salvo. Confira a qualidade da referência para habilitá-la." : "Perfil vocal salvo.");
     } catch (error) { toast(error.message, true); }
   }
@@ -2074,8 +3081,15 @@
     if (!profileId || !line) { toast("Salve o perfil vocal antes de extrair uma referência.", true); return; }
     const start = Number($("#dubExtractStart").value), end = Number($("#dubExtractEnd").value);
     try {
-      await request("/voice-references/extract", { method: "POST", body: JSON.stringify({ session_id: line.session_id, voice_profile_id: profileId, start_time: start, end_time: end, reference_text: $("#dubReferenceText").value }) });
-      $("#dubVoiceDialog").close(); await loadAll(); toast("Amostra extraída e normalizada. Revise sua qualidade no perfil.");
+      const result = await request("/voice-references/extract", { method: "POST", body: JSON.stringify({ session_id: line.session_id, voice_profile_id: profileId, start_time: start, end_time: end, reference_text: $("#dubReferenceText").value }) });
+      $("#dubVoiceDialog").close();
+      storeVoiceProfile(result.profile, { refreshViews: false });
+      const owner = state.characters.find((item) => item.character_id === result.profile.character_id);
+      if (state.editingProfileId === profileId) {
+        $("#dubProfileReferenceText").value = result.profile.reference?.reference_text || "";
+        refreshVoiceProfileStatus(profileId, { updateModeControls: true });
+      } else refreshVoiceProfileStatus(profileId);
+      toast("Amostra extraída e normalizada. Revise sua qualidade no perfil.");
     } catch (error) { toast(error.message, true); }
   }
 
@@ -2085,8 +3099,11 @@
     const lineId = item.line_id, previousId = item.character_id || null, characterId = select.value || null;
     const character = currentStudioCharacter();
     applyStudioCharacterColor(character);
-    renderProfileOptions(character?.default_voice_profile_id || "");
-    renderProfileEditor(findProfile($("#dubVoiceSelect").value), character);
+    if (profileDraftDirty) renderProfileOptions(state.editingProfileId);
+    else {
+      renderProfileOptions(character?.default_voice_profile_id || "");
+      renderProfileEditor(findProfile($("#dubVoiceSelect").value), character);
+    }
     updateGenerateEnabled();
     if (characterId === previousId) return;
     select.disabled = true;
@@ -2097,7 +3114,7 @@
       if (filterCharacterId && filterCharacterId !== (characterId || "")) {
         try { await loadLines(true); }
         catch (error) { renderLines(); toast(`Personagem salvo. Não foi possível atualizar a lista: ${error.message}`, true); return; }
-      } else renderLines();
+      }
       toast("Personagem associado e salvo nesta fala.");
     } catch (error) {
       if (state.selectedLine?.line_id === lineId) {
@@ -2125,14 +3142,12 @@
     setLineSaveStatus("Salvando…", "saving");
     const operation = lineAutosaveQueue.catch(() => false).then(async () => {
       const saved = await request(`/lines/${encodeURIComponent(lineId)}`, { method: "PUT", body: JSON.stringify(body) });
-      const row = state.lines.find((entry) => entry.line_id === lineId);
-      if (row) Object.assign(row, saved);
       if (state.selectedLine?.line_id === lineId) {
         Object.assign(state.selectedLine, saved);
         if (revision === lineEditRevision) setLineSaveStatus("Salvo automaticamente", "saved");
         updateGenerateEnabled();
       }
-      renderLines();
+      updateSavedLineInViews(lineId, saved);
       return true;
     }).catch((error) => {
       if (state.selectedLine?.line_id === lineId && revision === lineEditRevision) {
@@ -2152,16 +3167,28 @@
     if (!(await saveLine())) return false;
     const profileId = $("#dubVoiceSelect").value;
     if (!profileId) { toast("Selecione um perfil de voz pronto.", true); return false; }
+    const oneOffSpeedText = $("#dubSingleTakeSpeed").value.trim();
+    const oneOffSpeed = oneOffSpeedText === "" ? null : Number(oneOffSpeedText);
+    if (oneOffSpeed !== null && (!Number.isFinite(oneOffSpeed) || oneOffSpeed < 0.5 || oneOffSpeed > 2)) {
+      toast("A velocidade desta fala deve ficar entre 0,5× e 2×.", true); return false;
+    }
+    const takeGenerationSettings = generationSettings();
+    if (oneOffSpeed !== null) takeGenerationSettings.duration = null;
     const button = $("#dubGenerateTake");
     button.disabled = true; button.innerHTML = '<span class="dub-inline-spinner" aria-hidden="true"></span> Gerando…';
     try {
       await request(`/lines/${encodeURIComponent(item.line_id)}/takes`, { method: "POST", body: JSON.stringify({
         occurrence_id: item.occurrence_id, voice_profile_id: profileId, instruct: $("#dubInstruction").value,
-        speed: Number($("#dubSpeed").value), manual_override: $("#dubManualOverride").checked,
-        generation_settings: generationSettings(),
+        speed: oneOffSpeed ?? Number($("#dubSpeed").value), manual_override: $("#dubManualOverride").checked,
+        generation_settings: takeGenerationSettings,
       }) });
       toast("Take colocado na fila local de geração.");
-      try { await loadAll(); }
+      try {
+        await refreshQueue(false);
+        await loadLines(true);
+        await loadPlaybackLines();
+        void refreshDubbingBlockPlan(true);
+      }
       catch (error) { toast(`Take enfileirado; não foi possível atualizar a lista: ${error.message}`, true); }
       return true;
     } catch (error) { toast(error.message, true); updateGenerateEnabled(); return false; }
@@ -2210,7 +3237,10 @@
       else if (!result.eligible) toast("Nenhuma fala elegível encontrada para este escopo.", true);
       else if (scopeMode === "video_character") toast(`${result.queued} fala(s) do vídeo adicionadas à fila. ${result.already_done || 0} já tinham take e ${result.already_active || 0} já estavam na fila.`);
       else toast(`${result.queued} fala(s) adicionada(s) à fila; ${result.missing.length} sem perfil foram ignoradas.`);
-      await loadAll();
+      await refreshQueue(false);
+      await loadLines(true);
+      await loadPlaybackLines();
+      void refreshDubbingBlockPlan(true);
     } catch (error) { toast(error.message, true); }
   }
 
@@ -2234,7 +3264,7 @@
       const result = await request(`/queue/${action}${query}`, { method: "POST" });
       if (action === "retry-errors") toast(`${result.retried} erro(s) recolocado(s) na fila.`);
       else if (action === "cancel-pending") toast(`${result.cancelled} job(s) pendente(s) cancelado(s).`);
-      await refreshQueue(); await loadAll();
+      await refreshQueue(false);
     } catch (error) { toast(error.message, true); }
   }
 
@@ -2288,9 +3318,8 @@
     const video = $("#dubPreviewVideo"), audio = $("#dubPreviewAudio");
     if (!item || token !== state.timelinePlaybackToken || video.paused || !$("#dubAutoFollowTimeline").checked) return;
     const takes = item.takes || [];
-    const take = takes.find((entry) => entry.take_id === state.selectedTakeId && entry.audio_master_path)
-      || takes.find((entry) => entry.status === "approved" && entry.audio_master_path)
-      || takes.find((entry) => entry.audio_master_path);
+    const take = takes.find((entry) => entry.status !== "superseded" && entry.audio_master_path)
+      || takes.find((entry) => entry.take_id === state.selectedTakeId && entry.audio_master_path);
     if (!take) {
       audio.pause();
       state.autoPlaybackTakeId = "";
@@ -2406,7 +3435,8 @@
       } else $("#dubPreviewAudio").pause();
     });
     $("#dubRefresh").addEventListener("click", () => void loadAll());
-    $("#dubSessionFilter").addEventListener("change", async (event) => { state.selectedSessionId = event.target.value; state.timelineSelectedOccurrenceIds.clear(); resetBatchSelection(); await loadAll(false); });
+    $("#dubSessionFilter").addEventListener("change", async (event) => { state.selectedSessionId = event.target.value; updateDeleteBlockButton(); state.timelineSelectedOccurrenceIds.clear(); resetBatchSelection(); await loadAll(false); });
+    $("#dubDeleteBlock").addEventListener("click", () => void deleteSelectedBlock());
     $("#dubCharacterFilter").addEventListener("change", () => void loadLines(false));
     $("#dubStatusFilter").addEventListener("change", () => void loadLines(false));
     let searchTimer = 0;
@@ -2436,18 +3466,29 @@
     });
     $("#dubUseRoiReference").addEventListener("click", () => void useRoiReference());
     $("#dubTestProfile").addEventListener("click", () => void testVoiceProfile());
+    document.querySelectorAll("[data-dub-speed]").forEach((button) => button.addEventListener("click", () => {
+      $("#dubSpeed").value = button.dataset.dubSpeed;
+      $("#dubDuration").value = "";
+      markProfileDraftDirty();
+    }));
     $("#dubGenerateCandidates").addEventListener("click", () => void generateDesignCandidates());
+    $("#dubDesignAddOption").addEventListener("click", () => {
+      const select = addDesignPromptField();
+      state.profilePresetKey = ""; updateProfileModeControls(); select.focus();
+      markProfileDraftDirty();
+    });
     $("#dubLocalProfileMode").addEventListener("change", updateProfileModeControls);
     document.querySelectorAll('input[name="dubVoiceSource"]').forEach((radio) => radio.addEventListener("change", () => {
       if (!radio.checked) return;
+      if (radio.value === "clone") state.referenceRemoveRequested = false;
       clearDesignCandidates();
       setVoiceMode(radio.value);
       if (radio.value === "design") state.profilePresetKey = "";
       updateProfileModeControls();
     }));
     $("#dubProfileAuthorized").addEventListener("change", updateProfileModeControls);
-    for (const selector of ["#dubDesignGender", "#dubDesignAge", "#dubDesignPitch", "#dubDesignStyle", "#dubDesignRhythm", "#dubDesignTexture", "#dubDesignDescription"]) {
-      $(selector).addEventListener(selector.startsWith("#dubDesign") && ["#dubDesignGender", "#dubDesignAge", "#dubDesignPitch", "#dubDesignStyle"].includes(selector) ? "change" : "input", () => {
+    for (const selector of ["#dubDesignGender", "#dubDesignAge", "#dubDesignPitch", "#dubDesignStyle"]) {
+      $(selector).addEventListener("change", () => {
         clearDesignCandidates();
         state.profilePresetKey = "";
         updateProfileModeControls();
@@ -2457,6 +3498,7 @@
       state.profilePresetKey = "";
       applyVoiceDesignInstruction("");
       updateProfileModeControls();
+      markProfileDraftDirty();
       toast("Modelo desmarcado. Os atributos podem ser escolhidos livremente.");
     });
     $("#dubBrowseModels").addEventListener("click", () => $("#dubVoiceCatalogDialog").showModal());
@@ -2475,18 +3517,20 @@
         toast(`Atributos compatíveis aplicados para “${name}”. O áudio do site não foi baixado.`);
       }
       updateProfileModeControls();
+      markProfileDraftDirty();
       $("#dubVoiceCatalogDialog").close();
       $("#dubProfileName").focus();
     }));
     $("#dubProfileName").addEventListener("input", () => {
       const owner = state.characters.find((item) => item.character_id === $("#dubVoiceCharacterId").value);
-      $("#dubSaveProfile").disabled = !$("#dubProfileName").value.trim() || !owner?.name_verified;
+      updateProfileSaveState();
     });
     $("#dubReferenceFile").addEventListener("change", (event) => {
       const file = event.target.files[0], audio = $("#dubReferencePreview");
       if (state.referenceUploadUrl) URL.revokeObjectURL(state.referenceUploadUrl);
       state.referenceUploadUrl = file ? URL.createObjectURL(file) : ""; audio.src = state.referenceUploadUrl; audio.classList.toggle("hidden", !file);
       if (file) {
+        state.referenceRemoveRequested = false;
         setVoiceMode("clone");
         state.profilePresetKey = "";
         updateProfileModeControls();
@@ -2500,11 +3544,23 @@
     $("#dubVoiceMode").addEventListener("change", () => { const clone = $("#dubVoiceMode").value === "clone"; $("#dubVoiceReferenceFields").classList.toggle("hidden", !clone); $("#dubVoiceInstructWrap").classList.toggle("hidden", clone); });
     $("#dubExtractReference").addEventListener("click", () => void extractReference());
     $("#dubStudioCharacter").addEventListener("change", () => { void saveStudioCharacterAssignment(); void refreshDubbingBlockPlan(true); });
-    $("#dubVoiceSelect").addEventListener("change", () => {
+    $("#dubVoiceSelect").addEventListener("change", (event) => {
+      if (profileDraftDirty && event.target.value !== state.editingProfileId && !confirmDiscardProfileDraft()) {
+        event.target.value = state.editingProfileId;
+        return;
+      }
       const character = currentStudioCharacter();
       const profile = findProfile($("#dubVoiceSelect").value);
       renderProfileEditor(profile, character);
       updateGenerateEnabled();
+    });
+    $("#dubStudioPanel").addEventListener("input", (event) => {
+      if (!event.target.matches("input, select, textarea") || event.target.id === "dubVoiceSelect") return;
+      if (event.target.closest(".dub-studio-voice, .dub-studio-direction")) markProfileDraftDirty();
+    });
+    $("#dubStudioPanel").addEventListener("change", (event) => {
+      if (!event.target.matches("input, select, textarea") || event.target.id === "dubVoiceSelect") return;
+      if (event.target.closest(".dub-studio-voice, .dub-studio-direction")) markProfileDraftDirty();
     });
     $("#dubManualOverride").addEventListener("change", updateGenerateEnabled);
     $("#dubText").addEventListener("input", () => { void scheduleLineAutosave(); });
@@ -2516,8 +3572,22 @@
     });
     $("#dubIntensity").addEventListener("change", () => { void scheduleLineAutosave(0); });
     $("#dubGenerateTake").addEventListener("click", () => void generate());
-    $("#dubPresetSelect").addEventListener("change", (event) => { const option = event.target.selectedOptions[0]; if (option?.value) { $("#dubInstruction").value = option.dataset.instruct || ""; $("#dubEmotion").value = option.dataset.emotion || "normal"; $("#dubIntensity").value = option.dataset.intensity || .7; setText("#dubIntensityValue", `${Math.round(Number($("#dubIntensity").value) * 100)}%`); void scheduleLineAutosave(0); } });
-    $("#dubSavePreset").addEventListener("click", async () => { const name = prompt("Nome do preset de interpretação:"); if (!name) return; try { await request("/presets", { method: "POST", body: JSON.stringify({ name, emotion: $("#dubEmotion").value, intensity: Number($("#dubIntensity").value), instruct: $("#dubInstruction").value.trim() || "Interpretação natural e clara." }) }); await loadAll(); toast("Preset salvo."); } catch (error) { toast(error.message, true); } });
+    $("#dubSuggestTakeSpeed").addEventListener("click", suggestSingleTakeSpeed);
+    $("#dubSingleTakeSpeed").addEventListener("input", () => {
+      const value = $("#dubSingleTakeSpeed").value.trim();
+      if (value) $("#dubSingleTakeSpeedHint").textContent = `Este take será gerado em ${Number(value).toFixed(2)}×. A velocidade do perfil não será alterada.`;
+    });
+    $("#dubPresetSelect").addEventListener("change", (event) => { const option = event.target.selectedOptions[0]; if (option?.value) $("#dubInstruction").value = option.dataset.instruct || ""; });
+    $("#dubSavePreset").addEventListener("click", async () => {
+      const name = prompt("Nome do preset de interpretação:"); if (!name) return;
+      try {
+        await request("/presets", { method: "POST", body: JSON.stringify({ name, emotion: $("#dubEmotion").value, intensity: Number($("#dubIntensity").value), instruct: $("#dubInstruction").value.trim() || "Interpretação natural e clara." }) });
+        const result = await request("/presets");
+        if (state.overview) state.overview.presets = result.items || [];
+        renderPresets(result.items || []);
+        toast("Preset salvo.");
+      } catch (error) { toast(error.message, true); }
+    });
     $("#dubSelectAll").addEventListener("change", (event) => {
       for (const item of state.lines) {
         if (event.target.checked) { state.selectedOccurrenceIds.add(item.occurrence_id); state.batchGeneratedOccurrenceIds.delete(item.occurrence_id); }
@@ -2538,7 +3608,8 @@
     $("#dubExportJson").addEventListener("click", () => openExport("json"));
     $("#dubExportCsv").addEventListener("click", () => openExport("csv"));
     $("#dubPlaySynced").addEventListener("click", playSynced);
-    $("#dubAudioOnly").addEventListener("click", () => { const audio = $("#dubPreviewAudio"); audio.currentTime = 0; void audio.play(); });
+    $("#dubAudioOnly").addEventListener("click", () => { const audio = $("#dubPreviewAudio"); audio.currentTime = 0; void audio.play().catch((error) => toast(`Não foi possível reproduzir o take: ${error.message}`, true)); });
+    $("#dubPreviewAudio").addEventListener("error", () => toast("Não foi possível carregar o áudio deste take. Atualize a página e tente novamente.", true));
     const previewVideo = $("#dubPreviewVideo");
     previewVideo.addEventListener("timeupdate", (event) => {
       const video = event.currentTarget;
@@ -2571,16 +3642,31 @@
     document.querySelectorAll("[data-close-dub-dialog]").forEach((button) => button.addEventListener("click", () => button.closest("dialog")?.close()));
   }
 
-  function open() {
+  async function pollDubbing(generation = dubbingPollGeneration) {
+    if (generation !== dubbingPollGeneration || $("#dubbingView").classList.contains("hidden")) return;
+    const counts = state.queue?.counts || {};
+    const queueActive = Number(counts.queued || 0) + Number(counts.generating || 0) > 0;
+    const checks = [refreshProvider()];
+    if (queueActive) checks.push(refreshQueue(false));
+    await Promise.allSettled(checks);
+    if (generation !== dubbingPollGeneration || $("#dubbingView").classList.contains("hidden")) return;
+    const providerStarting = !state.provider?.api_online || state.provider?.build_running;
+    state.poll = setTimeout(() => void pollDubbing(generation), queueActive || providerStarting ? 6000 : 30000);
+  }
+
+  function open(context = null) {
     // Refresh the canonical ROI roster whenever the user enters Dubbing.
+    if (context?.sessionId) prepareNavigation(context);
+    if (pendingSharedNavigation?.sessionId) state.selectedSessionId = pendingSharedNavigation.sessionId;
     void loadAll(state.loaded);
-    clearInterval(state.poll);
-    state.poll = setInterval(() => {
-      if (!$("#dubbingView").classList.contains("hidden")) { void refreshProvider(); void refreshQueue(false); void refreshDubbingBlockPlan(true); }
-    }, 4500);
+    clearTimeout(state.poll);
+    const generation = ++dubbingPollGeneration;
+    state.poll = setTimeout(() => void pollDubbing(generation), 6000);
   }
 
   bind();
+  initializeDubbingRuntimeVolume();
+  initializeLineSortControls();
   initializeLineColumnResizers();
   initializeDubTimelineInteractions();
   window.addEventListener("dubsync:character-colors-updated", (event) => {
@@ -2597,5 +3683,5 @@
       renderLines();
     }
   });
-  window.DubSyncDubbing = { open, generate, handleTimelineShortcut: handleDubTimelineShortcut, refreshTimelineData: () => loadAll(true) };
+  window.DubSyncDubbing = { open, prepareNavigation, getNavigationState, generate, handleTimelineShortcut: handleDubTimelineShortcut, refreshTimelineData: () => loadAll(true) };
 })();

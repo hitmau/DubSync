@@ -6,7 +6,7 @@ import secrets
 from datetime import datetime, timezone
 from pathlib import Path
 
-from sqlalchemy import case, create_engine, delete, func, inspect, or_, select, text
+from sqlalchemy import and_, case, create_engine, delete, func, inspect, or_, select, text
 from sqlalchemy.orm import sessionmaker
 from rapidfuzz.fuzz import ratio, token_set_ratio
 
@@ -16,8 +16,9 @@ from ..events.replacements import clean_replacement_rules
 from ..projects.context import scoped_project_id
 from .models import (
     AudioTake, AudioTakeReview, Base, CaptureLink, DialogueLine, DialogueOccurrence,
-    DubbingCharacter, DubbingProject, EventRecord, FineSweepRun, ProjectTextReplacementSettings,
-    ReviewRecord, RoiCharacterRecord, SessionRecord, TimelineMarker, TtsJob,
+    CaptureTraversal, DubbingCharacter, DubbingProject, EventRecord, FineSweepRun,
+    ProjectTextReplacementSettings, ReviewRecord, RoiCharacterRecord, RuntimeTestItem,
+    SessionRecord, TimelineMarker, TtsJob,
 )
 
 
@@ -103,8 +104,8 @@ class DubSyncStore:
                                     "error='Servidor reiniciado durante o pente fino.' "
                                     "WHERE state='running'"))
             current_version = int(connection.exec_driver_sql("PRAGMA user_version").scalar_one())
-            if current_version > 7:
-                raise RuntimeError(f"Schema DubSync v{current_version} é mais novo que esta aplicação (v7).")
+            if current_version > 9:
+                raise RuntimeError(f"Schema DubSync v{current_version} é mais novo que esta aplicação (v9).")
             if current_version < 2:
                 tables = set(inspect(self.engine).get_table_names())
                 required = {"capture_sessions", "dialogue_events", "review_history", "roi_characters",
@@ -214,6 +215,22 @@ class DubSyncStore:
                     "INSERT OR IGNORE INTO schema_migrations(version,name,applied_at) "
                     "VALUES (7,'fase3_game_plugin_runtime_foundation',:applied_at)"), {"applied_at": utc_now()})
                 connection.exec_driver_sql("PRAGMA user_version=7")
+                current_version = 7
+            if current_version < 8:
+                connection.execute(text(
+                    "INSERT OR IGNORE INTO schema_migrations(version,name,applied_at) "
+                    "VALUES (8,'persistent_voice_design_candidates',:applied_at)"), {"applied_at": utc_now()})
+                connection.exec_driver_sql("PRAGMA user_version=8")
+                current_version = 8
+            if current_version < 9:
+                profile_columns = {column["name"] for column in inspect(self.engine).get_columns("voice_profiles")}
+                if "default_direction" not in profile_columns:
+                    connection.execute(text(
+                        "ALTER TABLE voice_profiles ADD COLUMN default_direction TEXT NOT NULL DEFAULT ''"))
+                connection.execute(text(
+                    "INSERT OR IGNORE INTO schema_migrations(version,name,applied_at) "
+                    "VALUES (9,'voice_profile_default_direction',:applied_at)"), {"applied_at": utc_now()})
+                connection.exec_driver_sql("PRAGMA user_version=9")
 
     def create_fine_sweep(self, session_id: str) -> dict:
         with self.Session.begin() as db:
@@ -709,7 +726,8 @@ class DubSyncStore:
 
     def add_manual_event(self, session_id: str, text_value: str, start_time: float,
                         end_time: float, character: str | None = None,
-                        assets: list[dict] | None = None, frame_id: int = 0) -> dict:
+                        assets: list[dict] | None = None, frame_id: int = 0,
+                        ocr_observation: dict | None = None) -> dict:
         """Persist a reviewer-authored dialogue without presenting it as OCR output."""
         now = utc_now()
         with self.Session.begin() as db:
@@ -719,20 +737,58 @@ class DubSyncStore:
             last = db.scalar(select(EventRecord.sequence).where(EventRecord.session_id == session_id)
                              .order_by(EventRecord.sequence.desc()).limit(1)) or 0
             event_id = str(uuid.uuid4())
-            original = text_value.strip()
+            final_text = text_value.strip()
+            evidence = dict(ocr_observation or {})
+            original = str(evidence.get("raw_text") or final_text).strip()
             asset_list = assets or []
+            for asset in evidence.get("image_assets") or []:
+                if isinstance(asset, dict) and asset not in asset_list:
+                    asset_list.append(asset)
             start_path = next((item["path"] for item in asset_list if item.get("kind") == "start"), None)
+            confidence = float(evidence.get("confidence", 1.0)) if evidence else 1.0
+            event_bbox = evidence.get("bbox") if isinstance(evidence.get("bbox"), list) else []
+            event_frame_id = int(evidence.get("frame_id", frame_id)) if evidence else int(frame_id)
+            timing_quality = str(evidence.get("timing_quality") or "exact_pts") if evidence else "manual"
+            region_id = evidence.get("region_id") if evidence else None
+            character_name = self._clean_character_name(character)
+            character_profile_id = None
+            if region_id and self._is_character_name(character_name):
+                note = ("Associado ao criar manualmente um diálogo após OCR do nome do personagem em "
+                        f"{float(evidence.get('source_time', start_time)):.3f} s.")
+                profile = self._ensure_roi_character_record(
+                    db, region_id, character_name, note, now, session.project_id,
+                )
+                character_name = profile.alias or profile.name
+                character_profile_id = profile.character_id
+            observation = ({
+                "source": "manual_dialog_ocr",
+                "text": original,
+                "processed_text": str(evidence.get("processed_text") or final_text),
+                "confidence": confidence,
+                "source_time": evidence.get("source_time", start_time),
+                "frame_id": event_frame_id,
+                "timing_quality": timing_quality,
+                "timing_error_ms": float(evidence.get("timing_error_ms") or 0),
+                "bbox": event_bbox,
+                "region_id": evidence.get("region_id"),
+                "region_name": evidence.get("region_name"),
+                "speaker": evidence.get("speaker"),
+                "image_assets": evidence.get("image_assets") or [],
+            } if evidence else {"source": "manual", "text": final_text, "confidence": None})
             row = EventRecord(
                 event_id=event_id, session_id=session_id, sequence=int(last) + 1,
-                segment_id="manual", start_time=float(start_time), end_time=float(end_time),
+                segment_id="manual_ocr" if evidence else "manual",
+                start_time=float(start_time), end_time=float(end_time),
                 original_text=original,
-                processed_text=original,
-                ocr_observations_json=[{"source": "manual", "text": original, "confidence": None}],
-                normalized_text=normalize_text(original), confidence=1.0, bbox_json=[],
+                processed_text=final_text,
+                ocr_observations_json=[observation],
+                normalized_text=normalize_text(final_text), confidence=confidence, bbox_json=event_bbox,
                 start_frame_path=start_path, best_frame_path=start_path,
-                assets_json=asset_list, character=(character.strip()[:120] or None) if character else None,
-                review_status="pending", truncated=False, timing_quality="manual", timing_error_ms=0.0,
-                frame_id=int(frame_id), created_at=now, updated_at=now,
+                assets_json=asset_list, character=character_name or None,
+                character_profile_id=character_profile_id, region_id=region_id,
+                review_status="pending", truncated=False, timing_quality=timing_quality,
+                timing_error_ms=float(evidence.get("timing_error_ms") or 0) if evidence else 0.0,
+                frame_id=event_frame_id, created_at=now, updated_at=now,
             )
             db.add(row)
             db.add(ReviewRecord(event_id=event_id, action="manual_create",
@@ -948,8 +1004,13 @@ class DubSyncStore:
             ((EventRecord.review_status == "pending") & (EventRecord.confidence < 0.68), 1), else_=0)), 0)
         discarded = func.coalesce(func.sum(case(
             (EventRecord.review_status == "discarded", 1), else_=0)), 0)
+        missing_character = func.coalesce(func.sum(case((and_(
+            EventRecord.review_status != "discarded",
+            or_(EventRecord.character.is_(None), func.trim(EventRecord.character) == ""),
+        ), 1), else_=0)), 0)
         with self.Session() as db:
-            statement = select(func.count(), green, pending, low_confidence, discarded).where(
+            statement = select(func.count(), green, pending, low_confidence, discarded,
+                               missing_character).where(
                 EventRecord.review_status != "merged")
             project_id = scoped_project_id()
             if project_id:
@@ -957,13 +1018,15 @@ class DubSyncStore:
                     SessionRecord.project_id == project_id)
             if session_id:
                 statement = statement.where(EventRecord.session_id == session_id)
-            total, green_count, pending_count, low_count, discarded_count = db.execute(statement).one()
+            total, green_count, pending_count, low_count, discarded_count, missing_character_count = \
+                db.execute(statement).one()
             return {
                 "total": int(total or 0),
                 "green": int(green_count or 0),
                 "pending": int(pending_count or 0),
                 "low_confidence": int(low_count or 0),
                 "discarded": int(discarded_count or 0),
+                "missing_character": int(missing_character_count or 0),
             }
 
     @staticmethod
@@ -1179,6 +1242,7 @@ class DubSyncStore:
                     raise ValueError("A fala tem um take em geração. Cancele ou aguarde a fila antes de excluí-la definitivamente.")
                 for take in takes:
                     take_paths.update(path for path in (take.audio_master_path, take.audio_preview_path) if path)
+                self._preserve_runtime_test_references(db, occurrence_id, take_ids)
                 db.execute(delete(TtsJob).where(TtsJob.take_id.in_(take_ids or [""])))
                 db.execute(delete(AudioTakeReview).where(AudioTakeReview.occurrence_id == occurrence_id))
                 db.execute(delete(AudioTake).where(AudioTake.occurrence_id == occurrence_id))
@@ -1229,6 +1293,358 @@ class DubSyncStore:
             except (OSError, RuntimeError, ValueError):
                 continue
         return {"deleted": True, "event_id": event_id, "restored_merged_sources": len(merged_sources)}
+
+    def permanently_delete_events(self, event_ids: list[str]) -> dict:
+        """Atomically delete selected dialogues and their now-unshared dubbing data."""
+        unique_ids = list(dict.fromkeys(str(value) for value in event_ids if value))
+        if not unique_ids:
+            raise ValueError("Selecione pelo menos um diálogo.")
+        if len(unique_ids) > 5000:
+            raise ValueError("A seleção excede o limite de 5.000 diálogos.")
+
+        take_paths: set[str] = set()
+        event_paths_by_session: dict[str, set[str]] = {}
+        session_roots: dict[str, Path] = {}
+        project_id = scoped_project_id()
+        with self.Session.begin() as db:
+            statement = select(EventRecord).where(EventRecord.event_id.in_(unique_ids))
+            if project_id:
+                statement = statement.join(SessionRecord, SessionRecord.session_id == EventRecord.session_id).where(
+                    SessionRecord.project_id == project_id,
+                )
+            rows = db.scalars(statement).all()
+            rows_by_id = {row.event_id: row for row in rows}
+            if len(rows_by_id) != len(unique_ids):
+                missing = next((event_id for event_id in unique_ids if event_id not in rows_by_id), unique_ids[0])
+                raise KeyError(missing)
+
+            for row in rows:
+                event_paths_by_session.setdefault(row.session_id, set()).update(self._event_asset_paths(row))
+                session = db.get(SessionRecord, row.session_id)
+                if session:
+                    try:
+                        session_roots[row.session_id] = self._session_asset_dir_for_row(session)
+                    except (OSError, RuntimeError, ValueError):
+                        session_roots[row.session_id] = self.sessions_root.resolve()
+                else:
+                    session_roots[row.session_id] = self.sessions_root.resolve()
+
+            links = db.scalars(select(CaptureLink).where(CaptureLink.event_id.in_(unique_ids))).all()
+            occurrence_ids = list(dict.fromkeys(link.occurrence_id for link in links))
+            orphan_occurrence_ids = []
+            for occurrence_id in occurrence_ids:
+                outside_link = db.scalar(select(CaptureLink.capture_link_id).where(
+                    CaptureLink.occurrence_id == occurrence_id,
+                    CaptureLink.event_id.not_in(unique_ids),
+                ).limit(1))
+                if not outside_link:
+                    orphan_occurrence_ids.append(occurrence_id)
+
+            takes = db.scalars(select(AudioTake).where(
+                AudioTake.occurrence_id.in_(orphan_occurrence_ids or [""]),
+            )).all()
+            take_ids = [take.take_id for take in takes]
+            generating_job = db.scalar(select(TtsJob.job_id).where(
+                TtsJob.take_id.in_(take_ids or [""]), TtsJob.status == "generating",
+            ).limit(1))
+            if generating_job:
+                raise ValueError("Há uma dublagem em geração. Aguarde a fila antes de excluir os diálogos selecionados.")
+
+            merged_sources = db.scalars(select(EventRecord).where(
+                EventRecord.merged_into.in_(unique_ids),
+                EventRecord.event_id.not_in(unique_ids),
+            )).all()
+            for source in merged_sources:
+                source.merged_into = None
+                source.review_status = "pending"
+                source.updated_at = utc_now()
+            for row in rows:
+                if row.merged_into in unique_ids:
+                    row.merged_into = None
+
+            db.execute(delete(CaptureLink).where(CaptureLink.event_id.in_(unique_ids)))
+            for occurrence_id in orphan_occurrence_ids:
+                if db.scalar(select(CaptureLink.capture_link_id).where(
+                    CaptureLink.occurrence_id == occurrence_id,
+                ).limit(1)):
+                    raise RuntimeError("As referências de captura mudaram durante a exclusão. Atualize e tente novamente.")
+
+            current_takes = db.scalars(select(AudioTake).where(
+                AudioTake.occurrence_id.in_(orphan_occurrence_ids or [""]),
+            )).all()
+            current_take_ids = [take.take_id for take in current_takes]
+            take_paths = {path for take in current_takes
+                          for path in (take.audio_master_path, take.audio_preview_path) if path}
+            for occurrence_id in orphan_occurrence_ids:
+                self._preserve_runtime_test_references(db, occurrence_id, current_take_ids)
+            db.execute(delete(TtsJob).where(TtsJob.take_id.in_(current_take_ids or [""])))
+            db.execute(delete(AudioTakeReview).where(or_(
+                AudioTakeReview.occurrence_id.in_(orphan_occurrence_ids or [""]),
+                AudioTakeReview.take_id.in_(current_take_ids or [""]),
+            )))
+            db.execute(delete(AudioTake).where(AudioTake.occurrence_id.in_(orphan_occurrence_ids or [""])))
+
+            removed_line_ids = set()
+            for occurrence_id in orphan_occurrence_ids:
+                occurrence = db.get(DialogueOccurrence, occurrence_id)
+                if occurrence:
+                    removed_line_ids.add(occurrence.line_id)
+                    db.delete(occurrence)
+            for line_id in removed_line_ids:
+                if not db.scalar(select(DialogueOccurrence.occurrence_id).where(
+                    DialogueOccurrence.line_id == line_id,
+                ).limit(1)):
+                    line = db.get(DialogueLine, line_id)
+                    if line:
+                        db.delete(line)
+
+            db.execute(delete(ReviewRecord).where(ReviewRecord.event_id.in_(unique_ids)))
+            for run in db.scalars(select(FineSweepRun)).all():
+                findings = run.findings_json or []
+                filtered = [item for item in findings if not isinstance(item, dict)
+                            or item.get("event_id") not in unique_ids]
+                if len(filtered) != len(findings):
+                    run.findings_json = filtered
+            db.execute(delete(EventRecord).where(EventRecord.event_id.in_(unique_ids)))
+
+            result = {
+                "deleted": True,
+                "deleted_events": len(unique_ids),
+                "deleted_occurrences": len(orphan_occurrence_ids),
+                "deleted_takes": len(current_takes),
+                "preserved_shared_occurrences": len(occurrence_ids) - len(orphan_occurrence_ids),
+                "restored_merged_sources": len(merged_sources),
+            }
+            if len(unique_ids) == 1:
+                result["event_id"] = unique_ids[0]
+
+        remaining_event_paths = self._remaining_event_asset_paths()
+        for session_id, values in event_paths_by_session.items():
+            session_root = session_roots.get(session_id, self.sessions_root.resolve())
+            for value in values:
+                try:
+                    raw = Path(value)
+                    path = raw.resolve(strict=False) if raw.is_absolute() else (session_root / raw).resolve(strict=False)
+                    if path.is_relative_to(session_root) and path not in remaining_event_paths:
+                        path.unlink(missing_ok=True)
+                except (OSError, RuntimeError, ValueError):
+                    continue
+
+        with self.Session() as db:
+            remaining_take_paths = {str(path) for take in db.scalars(select(AudioTake)).all()
+                                    for path in (take.audio_master_path, take.audio_preview_path) if path}
+        data_root = self.sessions_root.parent.resolve()
+        for value in take_paths:
+            try:
+                relative = Path(value)
+                path = relative.resolve(strict=False) if relative.is_absolute() else (data_root / relative).resolve(strict=False)
+                if not path.is_relative_to(data_root):
+                    continue
+                if path.relative_to(data_root).as_posix() not in remaining_take_paths:
+                    path.unlink(missing_ok=True)
+            except (OSError, RuntimeError, ValueError):
+                continue
+        return result
+
+    @staticmethod
+    def _preserve_runtime_test_references(db, occurrence_id: str, take_ids: list[str]) -> None:
+        take_id_set = set(take_ids)
+        rows = db.scalars(select(RuntimeTestItem).where(or_(
+            RuntimeTestItem.occurrence_id == occurrence_id,
+            RuntimeTestItem.expected_take_id.in_(take_ids or [""]),
+            RuntimeTestItem.played_take_id.in_(take_ids or [""]),
+        ))).all()
+        for row in rows:
+            diagnostic = dict(row.diagnostic_json or {})
+            removed = dict(diagnostic.get("removed_dialogue_references") or {})
+            if row.occurrence_id == occurrence_id:
+                removed["occurrence_id"] = row.occurrence_id
+                row.occurrence_id = None
+            if row.expected_take_id in take_id_set:
+                removed["expected_take_id"] = row.expected_take_id
+                row.expected_take_id = None
+            if row.played_take_id in take_id_set:
+                removed["played_take_id"] = row.played_take_id
+                row.played_take_id = None
+            diagnostic["removed_dialogue_references"] = removed
+            row.diagnostic_json = diagnostic
+
+    def delete_capture_session(self, session_id: str) -> dict:
+        """Permanently delete one completed capture block, keeping shared dialogue data."""
+        active_states = {"queued", "downloading", "preparing", "running", "processing", "paused", "stopping"}
+        event_paths: set[str] = set()
+        take_paths: set[str] = set()
+        session_root = self.sessions_root.resolve()
+        project_id = scoped_project_id()
+
+        with self.Session.begin() as db:
+            session = db.get(SessionRecord, session_id)
+            if session is None or (project_id and session.project_id != project_id):
+                raise KeyError(session_id)
+            if session.state in active_states:
+                raise ValueError("Este bloco ainda está em andamento. Aguarde o término ou pare a captura antes de excluí-lo.")
+
+            children = db.scalars(select(SessionRecord).where(
+                SessionRecord.project_id == session.project_id,
+            )).all()
+            direct_children = [item for item in children
+                               if (item.config_json or {}).get("previous_session_id") == session_id]
+            if any(item.state in active_states for item in direct_children):
+                raise ValueError("Um bloco seguinte ainda está em andamento. Termine ou pare essa captura antes de excluir este bloco.")
+
+            running_sweep = db.scalar(select(FineSweepRun.run_id).where(
+                FineSweepRun.session_id == session_id, FineSweepRun.state == "running",
+            ).limit(1))
+            if running_sweep:
+                raise ValueError("Aguarde o pente fino deste bloco terminar antes de excluí-lo.")
+
+            try:
+                session_root = self._session_asset_dir_for_row(session)
+            except (OSError, RuntimeError, ValueError):
+                session_root = self.sessions_root.resolve()
+
+            events = db.scalars(select(EventRecord).where(
+                EventRecord.session_id == session_id,
+            )).all()
+            event_ids = [event.event_id for event in events]
+            event_id_set = set(event_ids)
+            event_paths = {path for event in events for path in self._event_asset_paths(event)}
+            links = db.scalars(select(CaptureLink).where(or_(
+                CaptureLink.session_id == session_id,
+                CaptureLink.event_id.in_(event_ids or [""]),
+            ))).all()
+            occurrence_ids = list(dict.fromkeys(link.occurrence_id for link in links))
+
+            # Only data whose last capture link belongs to this block can be removed.
+            orphan_occurrence_ids = []
+            for occurrence_id in occurrence_ids:
+                outside_link = db.scalar(select(CaptureLink.capture_link_id).where(
+                    CaptureLink.occurrence_id == occurrence_id,
+                    CaptureLink.session_id != session_id,
+                    CaptureLink.event_id.not_in(event_ids or [""]),
+                ).limit(1))
+                if not outside_link:
+                    orphan_occurrence_ids.append(occurrence_id)
+
+            takes = db.scalars(select(AudioTake).where(
+                AudioTake.occurrence_id.in_(orphan_occurrence_ids or [""]),
+            )).all()
+            take_ids = [take.take_id for take in takes]
+            jobs = db.scalars(select(TtsJob).where(
+                TtsJob.take_id.in_(take_ids or [""]),
+            )).all()
+            if any(job.status == "generating" for job in jobs):
+                raise ValueError("Há uma dublagem em geração neste bloco. Aguarde a fila antes de excluí-lo.")
+
+            parent_id = (session.config_json or {}).get("previous_session_id")
+            for child in direct_children:
+                config = dict(child.config_json or {})
+                if parent_id:
+                    config["previous_session_id"] = parent_id
+                else:
+                    config.pop("previous_session_id", None)
+                child.config_json = config
+
+            for event in events:
+                if event.merged_into in event_id_set:
+                    event.merged_into = None
+                for source in db.scalars(select(EventRecord).where(
+                    EventRecord.merged_into == event.event_id,
+                    EventRecord.event_id.not_in(event_ids or [""]),
+                )).all():
+                    source.merged_into = None
+                    source.review_status = "pending"
+                    source.updated_at = utc_now()
+
+            db.execute(delete(CaptureLink).where(or_(
+                CaptureLink.session_id == session_id,
+                CaptureLink.event_id.in_(event_ids or [""]),
+            )))
+            remaining_occurrence_ids = []
+            for occurrence_id in orphan_occurrence_ids:
+                still_linked = db.scalar(select(CaptureLink.capture_link_id).where(
+                    CaptureLink.occurrence_id == occurrence_id,
+                ).limit(1))
+                if not still_linked:
+                    remaining_occurrence_ids.append(occurrence_id)
+            # Recheck after removing this block's links; a concurrent link may have appeared.
+            if len(remaining_occurrence_ids) != len(orphan_occurrence_ids):
+                raise RuntimeError("As referências de captura mudaram durante a exclusão. Atualize e tente novamente.")
+
+            current_take_rows = db.scalars(select(AudioTake).where(
+                AudioTake.occurrence_id.in_(remaining_occurrence_ids or [""]),
+            )).all()
+            current_take_ids = [take.take_id for take in current_take_rows]
+            take_paths = {path for take in current_take_rows
+                          for path in (take.audio_master_path, take.audio_preview_path) if path}
+            removed_ready_takes = sum(take.status in {"generated", "publishing", "review", "ready", "approved"}
+                                      for take in current_take_rows)
+            for occurrence_id in remaining_occurrence_ids:
+                self._preserve_runtime_test_references(db, occurrence_id, current_take_ids)
+            db.execute(delete(TtsJob).where(TtsJob.take_id.in_(current_take_ids or [""])))
+            db.execute(delete(AudioTakeReview).where(or_(
+                AudioTakeReview.occurrence_id.in_(remaining_occurrence_ids or [""]),
+                AudioTakeReview.take_id.in_(current_take_ids or [""]),
+            )))
+            db.execute(delete(AudioTake).where(AudioTake.occurrence_id.in_(remaining_occurrence_ids or [""])))
+
+            removed_line_ids = set()
+            for occurrence_id in remaining_occurrence_ids:
+                occurrence = db.get(DialogueOccurrence, occurrence_id)
+                if occurrence:
+                    removed_line_ids.add(occurrence.line_id)
+                    db.delete(occurrence)
+            for line_id in removed_line_ids:
+                if not db.scalar(select(DialogueOccurrence.occurrence_id).where(
+                    DialogueOccurrence.line_id == line_id,
+                ).limit(1)):
+                    line = db.get(DialogueLine, line_id)
+                    if line:
+                        db.delete(line)
+
+            db.execute(delete(ReviewRecord).where(ReviewRecord.event_id.in_(event_ids or [""])))
+            db.execute(delete(EventRecord).where(EventRecord.event_id.in_(event_ids or [""])))
+            db.execute(delete(FineSweepRun).where(FineSweepRun.session_id == session_id))
+            db.execute(delete(TimelineMarker).where(TimelineMarker.session_id == session_id))
+            db.execute(delete(CaptureTraversal).where(CaptureTraversal.session_id == session_id))
+            db.delete(session)
+
+            result = {
+                "deleted": True,
+                "session_id": session_id,
+                "deleted_events": len(events),
+                "deleted_occurrences": len(remaining_occurrence_ids),
+                "deleted_takes": len(current_take_rows),
+                "removed_ready_takes": int(removed_ready_takes),
+                "preserved_shared_occurrences": len(occurrence_ids) - len(remaining_occurrence_ids),
+                "relinked_following_blocks": len(direct_children),
+            }
+
+        remaining_event_paths = self._remaining_event_asset_paths()
+        for value in event_paths:
+            try:
+                raw = Path(value)
+                path = raw.resolve(strict=False) if raw.is_absolute() else (session_root / raw).resolve(strict=False)
+                if path.is_relative_to(session_root) and path not in remaining_event_paths:
+                    path.unlink(missing_ok=True)
+            except (OSError, RuntimeError, ValueError):
+                continue
+
+        with self.Session() as db:
+            remaining_take_paths = {str(path) for take in db.scalars(select(AudioTake)).all()
+                                    for path in (take.audio_master_path, take.audio_preview_path) if path}
+        data_root = self.sessions_root.parent.resolve()
+        for value in take_paths:
+            try:
+                relative = Path(value)
+                path = relative.resolve(strict=False) if relative.is_absolute() else (data_root / relative).resolve(strict=False)
+                if not path.is_relative_to(data_root):
+                    continue
+                if path.relative_to(data_root).as_posix() not in remaining_take_paths:
+                    path.unlink(missing_ok=True)
+            except (OSError, RuntimeError, ValueError):
+                continue
+        return result
 
     def clear_session_events(self, session_id: str) -> int:
         """Remove only the selected block's events when its owner restarts it."""

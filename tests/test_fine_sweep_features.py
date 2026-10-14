@@ -37,6 +37,46 @@ class _FakeSource:
 
 
 class FineSweepFeatureTests(unittest.TestCase):
+    def test_retry_ocr_also_reads_configured_speaker_region(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            store = DubSyncStore(Path(temporary) / "test.sqlite3")
+            session_id = "99a73a68-6236-4f29-a115-a0fd4f730a20"
+            regions = [{"roi_id": "roi", "name": "Dialogue", "x": .1, "y": .5,
+                        "width": .8, "height": .4, "speaker_enabled": True,
+                        "speaker_region": {"x": .2, "y": .2, "width": .3, "height": .12}}]
+            store.create_session(session_id, "file", "local.mp4", 10, 30, "pt",
+                                 {"regions": regions}, "complete")
+            profile = store.ensure_roi_character("roi", "Warren", "Personagem já conhecido")
+            event_id, _ = store.add_event(session_id, {"start_time": 12, "original_text": "Fuja agora!",
+                    "processed_text": "Fuja agora!", "normalized_text": "fuja agora", "confidence": .8,
+                    "bbox_json": [10, 50, 40, 15], "text_phash": "abc", "region_id": "roi"})
+            store.finish_event(event_id, 15)
+
+            class _DialogueAndSpeakerOcr:
+                def __init__(self, *_args, **_kwargs):
+                    self.calls = 0
+
+                def recognize(self, _image):
+                    self.calls += 1
+                    text = "Fuja agora!" if self.calls == 1 else "Warren"
+                    return [OcrLine(text, .95, (0, 0, 30, 12))]
+
+            with patch.object(app_main, "store", store), \
+                 patch.object(app_main, "SESSION_DIR", Path(temporary) / "sessions"), \
+                 patch.object(app_main, "_event_source", return_value=_FakeSource()), \
+                 patch.object(app_main, "OcrEngine", _DialogueAndSpeakerOcr), \
+                 patch.object(app_main, "load_settings", return_value={"ocr": {}}):
+                result = app_main.retry_event_ocr(event_id, app_main.EventAtTime(at_time=13))
+
+            self.assertEqual(result["speaker"]["text"], "Warren")
+            self.assertEqual(result["speaker"]["candidate"], "Warren")
+            self.assertEqual(result["speaker"]["profile_id"], profile["character_id"])
+            self.assertIn("ocr_retry_speaker_crop", [asset["kind"] for asset in result["image_assets"]])
+            saved = store.event(event_id)
+            self.assertEqual(saved["ocr_observations_json"][-1]["speaker"]["candidate"], "Warren")
+            self.assertIsNone(saved["character"])
+            store.engine.dispose()
+
     def test_retry_ocr_reads_configured_roi_and_appends_observation(self):
         with tempfile.TemporaryDirectory() as temporary:
             store = DubSyncStore(Path(temporary) / "test.sqlite3")

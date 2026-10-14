@@ -38,6 +38,7 @@ body.layout-resizing.resize-y,body.layout-resizing.resize-y *{cursor:row-resize!
 .overview-block:disabled{cursor:default}
 .overview-block-fill{position:absolute;inset:0 auto 0 0;width:0;background:#f0bf31;pointer-events:none}
 .overview-block.complete .overview-block-fill{width:100%;background:#2bc781}
+.overview-sector-divider{position:absolute;z-index:2;top:-3px;bottom:-3px;width:2px;background:#d6ecff;box-shadow:0 0 5px #7dbbff;pointer-events:none}
 .overview-block.failed .overview-block-fill{width:100%;background:#d94b56}
 .overview-cursor{position:absolute;z-index:3;top:-4px;bottom:-4px;left:0;width:2px;background:#3898ff;box-shadow:0 0 4px #1681ff;pointer-events:none}
 .overview-cursor:before{content:"";position:absolute;top:-2px;left:-3px;width:7px;height:7px;border-radius:50%;background:#3997ff;border:1px solid #cfe7ff}
