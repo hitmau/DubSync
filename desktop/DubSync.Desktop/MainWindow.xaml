@@ -1,0 +1,82 @@
+<Window x:Class="DubSync.Desktop.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:avalonDock="https://github.com/Dirkster99/AvalonDock"
+        xmlns:themes="clr-namespace:AvalonDock.Themes;assembly=AvalonDock.Themes.Arc"
+        xmlns:views="clr-namespace:DubSync.Desktop.Views"
+        Title="DubSync Desktop" Height="930" Width="1560" MinHeight="700" MinWidth="1180"
+        WindowStartupLocation="CenterScreen" Background="{StaticResource CanvasBrush}"
+        Icon="Assets/dubsync-icon.png" Loaded="Window_Loaded" Closing="Window_Closing">
+    <Grid x:Name="RootGrid" Background="{StaticResource CanvasBrush}">
+        <Grid.RowDefinitions><RowDefinition Height="64"/><RowDefinition Height="*"/></Grid.RowDefinitions>
+
+        <Border Grid.Row="0" Background="#0C1523" BorderBrush="#1D2C40" BorderThickness="0,0,0,1" Padding="17,0">
+            <DockPanel LastChildFill="True">
+                <StackPanel Orientation="Horizontal" VerticalAlignment="Center" DockPanel.Dock="Left">
+                    <Border Width="36" Height="36" CornerRadius="10" Background="#1E68B2" BorderBrush="#4B9DF1" BorderThickness="1">
+                        <TextBlock Text="D" FontSize="22" FontWeight="Bold" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                    </Border>
+                    <StackPanel Margin="10,0,17,0" VerticalAlignment="Center">
+                        <TextBlock Text="DubSync" FontSize="17" FontWeight="Bold" />
+                        <TextBlock Text="DESKTOP · FASE 0 + 1" FontSize="9" Foreground="{StaticResource MutedBrush}" Margin="0,1,0,0" />
+                    </StackPanel>
+                    <Border Width="1" Height="28" Background="#26384E" Margin="0,0,12,0" />
+                    <Button x:Name="ProjectsNav" Tag="projects" Content="Projetos" Style="{StaticResource NavButton}" Click="Navigate_Click" />
+                    <Button x:Name="CaptureNav" Tag="capture" Content="Captura" Style="{StaticResource NavButton}" Click="Navigate_Click" />
+                    <Button x:Name="ReviewNav" Tag="review" Content="Revisão" Style="{StaticResource NavButton}" Click="Navigate_Click" />
+                    <Button x:Name="DubbingNav" Tag="dubbing" Content="Dublagem" Style="{StaticResource NavButton}" Click="Navigate_Click" />
+                    <Button x:Name="IntegrationNav" Tag="integration" Content="Integração" Style="{StaticResource NavButton}" Click="Navigate_Click" />
+                    <Button x:Name="GameplayNav" Tag="gameplay" Content="Hora da Jogatina" Style="{StaticResource NavButton}" Click="Navigate_Click" />
+                    <Button x:Name="SettingsNav" Tag="settings" Content="Configurações" Style="{StaticResource NavButton}" Click="Navigate_Click" />
+                </StackPanel>
+
+                <StackPanel Orientation="Horizontal" VerticalAlignment="Center" DockPanel.Dock="Right">
+                    <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="0,0,15,0">
+                        <Ellipse Width="8" Height="8" Fill="{Binding ConnectionDotBrush}" VerticalAlignment="Center" Margin="0,0,7,0" />
+                        <TextBlock Text="{Binding ConnectionStatus}" FontSize="11" FontWeight="SemiBold" />
+                    </StackPanel>
+                    <Border Background="#142238" BorderBrush="#263C58" BorderThickness="1" CornerRadius="8" Padding="10,6" Margin="0,0,10,0">
+                        <TextBlock Text="{Binding SelectedProject.Name, TargetNullValue='Nenhum projeto'}" FontSize="11" Foreground="#C2D3E7" MaxWidth="150" TextTrimming="CharacterEllipsis" />
+                    </Border>
+                    <Button x:Name="LayoutsButton" Content="▦  Layouts" Padding="12,8" Click="Layouts_Click">
+                        <Button.ContextMenu>
+                            <ContextMenu>
+                                <MenuItem Header="Salvar layout atual" Click="SaveLayout_Click" />
+                                <MenuItem Header="Restaurar layout padrão" Click="ResetLayout_Click" />
+                                <Separator />
+                                <MenuItem Header="Mostrar Navegador de projetos" Click="ShowExplorer_Click" />
+                                <MenuItem Header="Mostrar Propriedades do projeto" Click="ShowProperties_Click" />
+                                <MenuItem Header="Mostrar Conexão e atividade" Click="ShowDiagnostics_Click" />
+                            </ContextMenu>
+                        </Button.ContextMenu>
+                    </Button>
+                </StackPanel>
+            </DockPanel>
+        </Border>
+
+    <avalonDock:DockingManager x:Name="DockManager" Grid.Row="1" Background="{StaticResource CanvasBrush}">
+            <avalonDock:DockingManager.Theme><themes:ArcDarkTheme /></avalonDock:DockingManager.Theme>
+            <avalonDock:LayoutRoot>
+                <avalonDock:LayoutPanel Orientation="Vertical">
+                    <avalonDock:LayoutPanel Orientation="Horizontal">
+                        <avalonDock:LayoutAnchorablePane DockWidth="250">
+                            <avalonDock:LayoutAnchorable Title="Navegador de projetos" ContentId="project-explorer" CanClose="True" CanHide="True" />
+                        </avalonDock:LayoutAnchorablePane>
+
+                        <avalonDock:LayoutDocumentPane>
+                            <avalonDock:LayoutDocument Title="Projetos" ContentId="workspace" CanClose="False" IsSelected="True" />
+                        </avalonDock:LayoutDocumentPane>
+
+                        <avalonDock:LayoutAnchorablePane DockWidth="285">
+                            <avalonDock:LayoutAnchorable Title="Propriedades do projeto" ContentId="project-properties" CanClose="True" CanHide="True" />
+                        </avalonDock:LayoutAnchorablePane>
+                    </avalonDock:LayoutPanel>
+
+                    <avalonDock:LayoutAnchorablePane DockHeight="94">
+                        <avalonDock:LayoutAnchorable Title="Conexão e atividade" ContentId="diagnostics" CanClose="True" CanHide="True" />
+                    </avalonDock:LayoutAnchorablePane>
+                </avalonDock:LayoutPanel>
+            </avalonDock:LayoutRoot>
+        </avalonDock:DockingManager>
+    </Grid>
+</Window>

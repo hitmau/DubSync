@@ -1,0 +1,126 @@
+<UserControl x:Class="DubSync.Desktop.Views.ReviewView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             Background="Transparent" Loaded="View_Loaded" Unloaded="View_Unloaded">
+    <UserControl.Resources>
+        <Style x:Key="ReviewColumnHeaderStyle" TargetType="DataGridColumnHeader">
+            <Setter Property="Background" Value="#19283C"/><Setter Property="Foreground" Value="#B9CBE0"/>
+            <Setter Property="BorderBrush" Value="#263A52"/><Setter Property="BorderThickness" Value="0,0,1,1"/>
+            <Setter Property="Padding" Value="9,9"/><Setter Property="FontWeight" Value="SemiBold"/>
+        </Style>
+        <Style x:Key="ReviewRowStyle" TargetType="DataGridRow">
+            <Setter Property="Background" Value="Transparent"/><Setter Property="Foreground" Value="{StaticResource TextBrush}"/>
+            <Setter Property="BorderBrush" Value="#1E3046"/><Setter Property="BorderThickness" Value="0,0,0,1"/>
+            <Style.Triggers>
+                <Trigger Property="IsMouseOver" Value="True"><Setter Property="Background" Value="#17283D"/></Trigger>
+                <Trigger Property="IsSelected" Value="True"><Setter Property="Background" Value="#1B4776"/><Setter Property="Foreground" Value="White"/></Trigger>
+            </Style.Triggers>
+        </Style>
+        <Style x:Key="ReviewCellStyle" TargetType="DataGridCell">
+            <Setter Property="Background" Value="Transparent"/><Setter Property="Foreground" Value="{StaticResource TextBrush}"/>
+            <Setter Property="BorderThickness" Value="0"/><Setter Property="Padding" Value="8,0"/>
+        </Style>
+    </UserControl.Resources>
+    <Grid Margin="22,18,22,20">
+        <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
+        <Grid Margin="0,0,0,15">
+            <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+            <StackPanel>
+                <TextBlock Text="FASE 1 · REVISÃO" FontSize="10" FontWeight="Bold" Foreground="{StaticResource TealBrush}" />
+                <TextBlock Text="Revisar falas capturadas" FontSize="27" FontWeight="Bold" Margin="0,4,0,2" />
+                <TextBlock x:Name="ProjectLabel" Text="Projeto" FontSize="12" Foreground="{StaticResource MutedBrush}" />
+            </StackPanel>
+            <Button Grid.Column="1" Content="↻  Atualizar" Click="Refresh_Click" Padding="12,8" VerticalAlignment="Center" />
+        </Grid>
+
+        <Grid Grid.Row="1" Margin="0,0,0,12">
+            <Grid.ColumnDefinitions><ColumnDefinition Width="190"/><ColumnDefinition Width="190"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+            <ComboBox x:Name="SessionFilter" Grid.Column="0" Margin="0,0,8,0" SelectionChanged="Filter_SelectionChanged" ToolTip="Filtrar por bloco de captura"><ComboBoxItem Content="Todos os blocos" Tag="all" /></ComboBox>
+            <ComboBox x:Name="StatusFilter" Grid.Column="1" Margin="0,0,8,0" SelectedIndex="0" SelectionChanged="Filter_SelectionChanged" ToolTip="Filtrar por status de revisão">
+                <ComboBoxItem Content="Todos os status" Tag="all" />
+                <ComboBoxItem Content="Pendentes" Tag="pending" />
+                <ComboBoxItem Content="Confirmados" Tag="accepted" />
+                <ComboBoxItem Content="Corrigidos" Tag="corrected" />
+                <ComboBoxItem Content="Descartados" Tag="discarded" />
+                <ComboBoxItem Content="Baixa confiança" Tag="low-confidence" />
+            </ComboBox>
+            <TextBox x:Name="SearchInput" Grid.Column="2" Margin="0,0,8,0" Padding="10,7" VerticalContentAlignment="Center" TextChanged="Search_TextChanged" ToolTip="Buscar fala ou personagem" />
+            <TextBlock Grid.Column="2" Text="⌕ Buscar fala ou personagem…" IsHitTestVisible="False" Foreground="{StaticResource MutedBrush}" VerticalAlignment="Center" Margin="11,0,0,0">
+                <TextBlock.Style><Style TargetType="TextBlock"><Setter Property="Visibility" Value="Collapsed"/><Style.Triggers><DataTrigger Binding="{Binding Text, ElementName=SearchInput}" Value=""><Setter Property="Visibility" Value="Visible"/></DataTrigger></Style.Triggers></Style></TextBlock.Style>
+            </TextBlock>
+            <TextBlock x:Name="CountText" Grid.Column="3" Text="0 falas" FontSize="11" Foreground="{StaticResource MutedBrush}" VerticalAlignment="Center" Margin="8,0,0,0" />
+        </Grid>
+
+        <Grid Grid.Row="2">
+            <Grid.ColumnDefinitions><ColumnDefinition Width="1.25*"/><ColumnDefinition Width="14"/><ColumnDefinition Width="0.95*"/></Grid.ColumnDefinitions>
+            <Border Grid.Column="0" Background="{StaticResource SurfaceBrush}" BorderBrush="{StaticResource BorderBrushSoft}" BorderThickness="1" CornerRadius="12" Padding="7">
+                <DataGrid x:Name="EventsGrid" AutoGenerateColumns="False" CanUserResizeColumns="True" CanUserReorderColumns="True" CanUserSortColumns="True"
+                          IsReadOnly="True" SelectionMode="Single" SelectionUnit="FullRow" HeadersVisibility="Column" RowHeaderWidth="0"
+                          GridLinesVisibility="Horizontal" HorizontalGridLinesBrush="#23354B" VerticalGridLinesBrush="Transparent"
+                          Background="#0C1523" Foreground="{StaticResource TextBrush}" BorderThickness="0" RowHeight="37"
+                          EnableRowVirtualization="True" EnableColumnVirtualization="True" ScrollViewer.CanContentScroll="True"
+                          ScrollViewer.HorizontalScrollBarVisibility="Auto" ScrollViewer.VerticalScrollBarVisibility="Auto"
+                          ColumnHeaderStyle="{StaticResource ReviewColumnHeaderStyle}" RowStyle="{StaticResource ReviewRowStyle}" CellStyle="{StaticResource ReviewCellStyle}"
+                          SelectionChanged="Event_SelectionChanged">
+                    <DataGrid.Columns>
+                        <DataGridTextColumn Header="Ocorrência" Binding="{Binding OccurrenceLabel}" Width="92" />
+                        <DataGridTextColumn Header="Início" Binding="{Binding TimeLabel}" Width="70" />
+                        <DataGridTextColumn Header="Personagem" Binding="{Binding CharacterLabel}" Width="120" />
+                        <DataGridTextColumn Header="Fala" Binding="{Binding TextForList}" Width="*" MinWidth="180" />
+                        <DataGridTextColumn Header="Conf." Binding="{Binding ConfidenceLabel}" Width="62" />
+                        <DataGridTextColumn Header="Status" Binding="{Binding StatusLabel}" Width="94" />
+                    </DataGrid.Columns>
+                </DataGrid>
+            </Border>
+
+            <Border Grid.Column="2" Background="{StaticResource SurfaceBrush}" BorderBrush="{StaticResource BorderBrushSoft}" BorderThickness="1" CornerRadius="12" Padding="16">
+                <Grid>
+                    <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="0.8*"/><RowDefinition Height="Auto"/><RowDefinition Height="1.2*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+                    <Grid>
+                        <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                        <StackPanel><TextBlock Text="DETALHES DA FALA" FontSize="10" FontWeight="Bold" Foreground="{StaticResource MutedBrush}"/><TextBlock x:Name="SelectedEventLabel" Text="Selecione uma ocorrência" FontSize="12" FontWeight="SemiBold" Margin="0,4,0,0"/></StackPanel>
+                        <TextBlock x:Name="ConfidenceDetail" Grid.Column="1" Text="" FontSize="11" Foreground="{StaticResource TealBrush}" VerticalAlignment="Center" Margin="0,0,10,0" />
+                        <Button x:Name="RetryOcrButton" Grid.Column="2" Content="↻ Refazer OCR" Click="RetryOcr_Click" Padding="10,6" IsEnabled="False" />
+                    </Grid>
+                    <Border Grid.Row="1" Background="#070D16" BorderBrush="{StaticResource BorderBrushSoft}" BorderThickness="1" CornerRadius="8" Margin="0,11,0,12" ClipToBounds="True">
+                        <Grid>
+                            <Image x:Name="EvidenceImage" Stretch="Uniform" />
+                            <StackPanel x:Name="EvidencePlaceholder" HorizontalAlignment="Center" VerticalAlignment="Center" IsHitTestVisible="False">
+                                <TextBlock Text="EVIDÊNCIA DO OCR" FontSize="9" FontWeight="Bold" Foreground="{StaticResource TealBrush}" HorizontalAlignment="Center" />
+                                <TextBlock x:Name="EvidenceMessage" Text="Selecione uma fala para carregar a imagem salva." FontSize="11" Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" TextAlignment="Center" Margin="0,6,0,0" />
+                            </StackPanel>
+                        </Grid>
+                    </Border>
+                    <StackPanel Grid.Row="2" Margin="0,0,0,11">
+                        <TextBlock Text="Texto reconhecido pelo OCR" FontSize="10" Foreground="{StaticResource MutedBrush}" />
+                        <TextBox x:Name="OriginalTextBox" IsReadOnly="True" TextWrapping="Wrap" AcceptsReturn="True" VerticalScrollBarVisibility="Auto" MinHeight="42" MaxHeight="76" Margin="0,4,0,0" />
+                    </StackPanel>
+                    <Grid Grid.Row="3">
+                        <Grid.RowDefinitions><RowDefinition Height="*"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+                        <StackPanel>
+                            <TextBlock Text="Texto revisado / corrigido" FontSize="10" Foreground="{StaticResource MutedBrush}" />
+                            <TextBox x:Name="CorrectedTextBox" TextWrapping="Wrap" AcceptsReturn="True" VerticalScrollBarVisibility="Auto" MinHeight="52" Margin="0,4,0,10" />
+                            <Grid>
+                                <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="10"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                                <StackPanel><TextBlock Text="Personagem" FontSize="10" Foreground="{StaticResource MutedBrush}"/><TextBox x:Name="CharacterInput" Margin="0,4,0,0" /></StackPanel>
+                                <StackPanel Grid.Column="2"><TextBlock Text="Emoção" FontSize="10" Foreground="{StaticResource MutedBrush}"/><TextBox x:Name="EmotionInput" Margin="0,4,0,0" /></StackPanel>
+                            </Grid>
+                            <Grid Margin="0,9,0,0">
+                                <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="10"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                                <StackPanel><TextBlock Text="Início (s)" FontSize="10" Foreground="{StaticResource MutedBrush}"/><TextBox x:Name="StartTimeInput" Margin="0,4,0,0" /></StackPanel>
+                                <StackPanel Grid.Column="2"><TextBlock Text="Fim (s)" FontSize="10" Foreground="{StaticResource MutedBrush}"/><TextBox x:Name="EndTimeInput" Margin="0,4,0,0" /></StackPanel>
+                            </Grid>
+                        </StackPanel>
+                    </Grid>
+                    <Grid Grid.Row="4" Margin="0,13,0,0">
+                        <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                        <TextBlock x:Name="ActionMessage" Text="As alterações são gravadas no banco atual do projeto." FontSize="9" Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" VerticalAlignment="Center" Margin="0,0,10,0" />
+                        <Button Grid.Column="1" Content="Salvar correção" Click="SaveCorrection_Click" Padding="10,7" Margin="0,0,6,0" />
+                        <Button Grid.Column="2" Content="✓ Confirmar" Style="{StaticResource PrimaryButton}" Click="Accept_Click" Padding="10,7" Margin="0,0,6,0" />
+                        <Button Grid.Column="3" Content="Descartar" Click="Discard_Click" Padding="10,7" Background="#812C39" BorderBrush="#B84350" />
+                    </Grid>
+                </Grid>
+            </Border>
+        </Grid>
+    </Grid>
+</UserControl>

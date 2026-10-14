@@ -32,6 +32,9 @@ htmlcov/
 node_modules/
 dist/
 build/
+desktop/DubSync.Desktop/bin/
+desktop/DubSync.Desktop/obj/
+desktop/artifacts/
 integration/plugins/replaced-articy/runtime/bin/
 integration/plugins/replaced-articy/runtime/obj/
 

@@ -1,0 +1,205 @@
+<UserControl x:Class="DubSync.Desktop.Views.CaptureView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             Background="Transparent" Loaded="View_Loaded" Unloaded="View_Unloaded">
+    <Grid Margin="22,18,22,20">
+        <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
+        <Grid Margin="0,0,0,14">
+            <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+            <StackPanel>
+                <TextBlock Text="FASE 1 · CAPTURA" FontSize="10" FontWeight="Bold" Foreground="{StaticResource TealBrush}" />
+                <TextBlock Text="Captura" FontSize="27" FontWeight="Bold" Margin="0,4,0,2" />
+                <TextBlock Text="{Binding ProjectLabel}" FontSize="12" Foreground="{StaticResource MutedBrush}" />
+            </StackPanel>
+            <Border Grid.Column="1" Background="#12263A" BorderBrush="{StaticResource BorderBrushSoft}" BorderThickness="1" CornerRadius="10" Padding="9,7" VerticalAlignment="Center">
+                <StackPanel Orientation="Horizontal">
+                    <Button Content="Abrir captura clássica · YouTube" Click="LegacyCapture_Click" Padding="9,5" Margin="0,0,10,0" ToolTip="Mantém acesso ao fluxo existente enquanto YouTube é migrado para a tela nativa." />
+                    <Ellipse Width="8" Height="8" Fill="{StaticResource TealBrush}" VerticalAlignment="Center" Margin="0,0,7,0"/>
+                    <TextBlock Text="Sessões preservadas" FontSize="10" Foreground="{StaticResource MutedBrush}" VerticalAlignment="Center" />
+                </StackPanel>
+            </Border>
+        </Grid>
+
+        <StackPanel Grid.Row="1" Orientation="Horizontal" Margin="0,0,0,14">
+            <Button x:Name="VideoModeButton" Content="▣  Captura por vídeo" Style="{StaticResource PrimaryButton}" Margin="0,0,8,0" Click="VideoMode_Click" />
+            <Button x:Name="RealModeButton" Content="◎  Captura Real" Click="RealMode_Click" />
+            <TextBlock Text="Jogo ao vivo · overlay e revisão sem espelhar a tela" Foreground="{StaticResource MutedBrush}" FontSize="11" VerticalAlignment="Center" Margin="13,0,0,0" />
+        </StackPanel>
+
+        <Grid Grid.Row="2" x:Name="VideoPanel">
+            <Grid.ColumnDefinitions><ColumnDefinition Width="365"/><ColumnDefinition Width="16"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+            <ScrollViewer Grid.Column="0" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                <StackPanel>
+                    <Border Background="{StaticResource SurfaceBrush}" BorderBrush="{StaticResource BorderBrushSoft}" BorderThickness="1" CornerRadius="12" Padding="16" Margin="0,0,0,11">
+                        <StackPanel>
+                            <TextBlock Text="FONTE DO VÍDEO" FontSize="10" FontWeight="Bold" Foreground="{StaticResource MutedBrush}" Margin="0,0,0,10" />
+                            <TextBlock Text="Arquivo local" FontSize="12" FontWeight="SemiBold" />
+                            <Grid Margin="0,5,0,11">
+                                <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                                <TextBox x:Name="FilePathInput" FontSize="11" Padding="8,7" VerticalContentAlignment="Center" ToolTip="Caminho local do vídeo" />
+                                <Button Grid.Column="1" Content="Procurar…" Padding="10,7" Margin="7,0,0,0" Click="ChooseFile_Click" />
+                            </Grid>
+                            <Grid>
+                                <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="12"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                                <StackPanel><TextBlock Text="Início (s)" FontSize="11" FontWeight="SemiBold"/><TextBox x:Name="StartInput" Text="0" Margin="0,4,0,0"/></StackPanel>
+                                <StackPanel Grid.Column="2"><TextBlock Text="Tamanho do bloco (min)" FontSize="11" FontWeight="SemiBold"/><TextBox x:Name="BlockMinutesInput" Text="20" Margin="0,4,0,0"/></StackPanel>
+                            </Grid>
+                            <Button Content="Usar o tempo atual do player como início" Click="UsePlayhead_Click" HorizontalAlignment="Left" Padding="9,6" Margin="0,8,0,0" />
+                            <TextBlock Text="Idioma das legendas" FontSize="11" FontWeight="SemiBold" Margin="0,11,0,0" />
+                            <TextBox x:Name="LanguageInput" Text="en" Margin="0,4,0,0" />
+                            <TextBlock x:Name="VideoDurationText" Text="Duração do vídeo ainda não consultada." FontSize="10" Foreground="{StaticResource MutedBrush}" Margin="0,8,0,0" TextWrapping="Wrap" />
+                        </StackPanel>
+                    </Border>
+
+                    <Border Background="{StaticResource SurfaceBrush}" BorderBrush="{StaticResource BorderBrushSoft}" BorderThickness="1" CornerRadius="12" Padding="16" Margin="0,0,0,11">
+                        <StackPanel>
+                            <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                                <StackPanel><TextBlock Text="ROI · LEGENDA" FontSize="10" FontWeight="Bold" Foreground="{StaticResource MutedBrush}"/><TextBlock Text="Área percentual dentro do vídeo" FontSize="10" Foreground="{StaticResource MutedBrush}" Margin="0,4,0,0"/></StackPanel>
+                                <TextBlock Grid.Column="1" Text="1 área" FontSize="10" Foreground="{StaticResource TealBrush}" VerticalAlignment="Center" />
+                            </Grid>
+                            <Grid Margin="0,12,0,0">
+                                <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="12"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                                <StackPanel><TextBlock Text="X (%)" FontSize="11"/><TextBox x:Name="RoiXInput" Text="8" Margin="0,4,0,0" TextChanged="RoiValues_TextChanged"/></StackPanel>
+                                <StackPanel Grid.Column="2"><TextBlock Text="Y (%)" FontSize="11"/><TextBox x:Name="RoiYInput" Text="63" Margin="0,4,0,0" TextChanged="RoiValues_TextChanged"/></StackPanel>
+                            </Grid>
+                            <Grid Margin="0,9,0,0">
+                                <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="12"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                                <StackPanel><TextBlock Text="Largura (%)" FontSize="11"/><TextBox x:Name="RoiWidthInput" Text="84" Margin="0,4,0,0" TextChanged="RoiValues_TextChanged"/></StackPanel>
+                                <StackPanel Grid.Column="2"><TextBlock Text="Altura (%)" FontSize="11"/><TextBox x:Name="RoiHeightInput" Text="32" Margin="0,4,0,0" TextChanged="RoiValues_TextChanged"/></StackPanel>
+                            </Grid>
+                            <TextBlock Text="Também é possível desenhar ou mover a ROI diretamente sobre o vídeo. Os valores acompanham a seleção." FontSize="10" Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" Margin="0,10,0,0" />
+                        </StackPanel>
+                    </Border>
+
+                    <StackPanel Orientation="Horizontal">
+                        <Button Content="Pré-visualizar frame" Click="Preview_Click" Padding="12,8" Margin="0,0,8,0" />
+                        <Button x:Name="StartCaptureButton" Content="▶  Iniciar bloco" Style="{StaticResource PrimaryButton}" Click="StartCapture_Click" Padding="13,8" />
+                    </StackPanel>
+                    <TextBlock x:Name="ErrorText" Foreground="#FF777E" FontSize="11" TextWrapping="Wrap" Visibility="Collapsed" Margin="2,9,2,0" />
+                </StackPanel>
+            </ScrollViewer>
+
+            <Grid Grid.Column="2">
+                <Grid.RowDefinitions><RowDefinition Height="1.15*"/><RowDefinition Height="14"/><RowDefinition Height="0.85*"/></Grid.RowDefinitions>
+                <Border Grid.Row="0" Background="#070D16" BorderBrush="{StaticResource BorderBrushSoft}" BorderThickness="1" CornerRadius="12" ClipToBounds="True">
+                    <Grid>
+                        <Grid.RowDefinitions><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+                        <Grid x:Name="FrameSurface" Grid.Row="0" Background="#070D16" ClipToBounds="True">
+                            <Image x:Name="PreviewImage" Stretch="Uniform" Visibility="Collapsed" />
+                            <MediaElement x:Name="VideoPlayer" LoadedBehavior="Manual" UnloadedBehavior="Manual" Stretch="Uniform" Visibility="Collapsed" MediaOpened="VideoPlayer_MediaOpened" MediaFailed="VideoPlayer_MediaFailed" />
+                            <Canvas x:Name="RoiCanvas" Background="Transparent" ClipToBounds="True" SizeChanged="RoiCanvas_SizeChanged" MouseLeftButtonDown="RoiCanvas_MouseLeftButtonDown" MouseMove="RoiCanvas_MouseMove" MouseLeftButtonUp="RoiCanvas_MouseLeftButtonUp" />
+                            <StackPanel x:Name="PreviewPlaceholder" HorizontalAlignment="Center" VerticalAlignment="Center" MaxWidth="380" IsHitTestVisible="False">
+                                <TextBlock Text="PREVIEW DO BLOCO" FontSize="10" FontWeight="Bold" Foreground="{StaticResource TealBrush}" HorizontalAlignment="Center" />
+                                <TextBlock Text="Escolha um vídeo e pré-visualize o frame do início." FontSize="13" Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" TextAlignment="Center" Margin="0,8,0,0" />
+                            </StackPanel>
+                            <Border VerticalAlignment="Bottom" HorizontalAlignment="Left" Background="#CC0B1421" CornerRadius="0,8,0,0" Padding="10,6" IsHitTestVisible="False">
+                                <TextBlock x:Name="PreviewMetaText" Text="Nenhum frame carregado" FontSize="10" Foreground="#D6E2F0" />
+                            </Border>
+                        </Grid>
+                        <Border Grid.Row="1" Background="#111D2B" BorderBrush="{StaticResource BorderBrushSoft}" BorderThickness="0,1,0,0" Padding="10,6">
+                            <Grid>
+                                <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+                                <Grid Grid.Row="0">
+                                    <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                                    <Button x:Name="PlayPauseButton" Content="▶" ToolTip="Reproduzir" Click="PlayPause_Click" Padding="9,4" Margin="0,0,9,0" IsEnabled="False" />
+                                    <Slider x:Name="PlayerTimeline" Grid.Column="1" Minimum="0" Maximum="1" ValueChanged="PlayerTimeline_ValueChanged" PreviewMouseLeftButtonDown="PlayerTimeline_PreviewMouseLeftButtonDown" PreviewMouseLeftButtonUp="PlayerTimeline_PreviewMouseLeftButtonUp" VerticalAlignment="Center" IsEnabled="False" />
+                                    <TextBlock x:Name="PlayerTimeText" Grid.Column="2" Text="00:00 / 00:00" FontSize="10" Foreground="{StaticResource MutedBrush}" VerticalAlignment="Center" Margin="10,0,10,0" />
+                                    <ComboBox x:Name="PlaybackSpeed" Grid.Column="3" Width="76" SelectedIndex="2" SelectionChanged="PlaybackSpeed_SelectionChanged" ToolTip="Velocidade de reprodução">
+                                        <ComboBoxItem Content="0,5×" Tag="0.5"/><ComboBoxItem Content="1×" Tag="1"/><ComboBoxItem Content="1,5×" Tag="1.5"/><ComboBoxItem Content="2×" Tag="2"/><ComboBoxItem Content="3×" Tag="3"/><ComboBoxItem Content="5×" Tag="5"/>
+                                    </ComboBox>
+                                </Grid>
+                                <TextBlock Grid.Row="1" Text="Reprodução sincronizada do arquivo · a extração respeita início, duração e ROI informados" FontSize="9" Foreground="{StaticResource MutedBrush}" Margin="0,5,0,0" />
+                            </Grid>
+                        </Border>
+                    </Grid>
+                </Border>
+
+                <Border Grid.Row="2" Background="{StaticResource SurfaceBrush}" BorderBrush="{StaticResource BorderBrushSoft}" BorderThickness="1" CornerRadius="12" Padding="14">
+                    <Grid>
+                        <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+                        <Grid>
+                            <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                            <StackPanel><TextBlock Text="BLOCOS E SESSÕES" FontSize="10" FontWeight="Bold" Foreground="{StaticResource MutedBrush}"/><TextBlock x:Name="SessionSummaryText" Text="Carregando sessões do projeto…" FontSize="11" Foreground="{StaticResource MutedBrush}" Margin="0,4,0,0"/></StackPanel>
+                            <Button Grid.Column="1" Content="↻ Atualizar" Click="Refresh_Click" Padding="10,6" VerticalAlignment="Center" />
+                        </Grid>
+                        <Grid Grid.Row="1" Margin="0,13,0,9">
+                            <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                            <TextBlock x:Name="SelectedSessionText" Text="Selecione um bloco para ver o estado." FontSize="11" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />
+                            <TextBlock x:Name="ProgressStatsText" Grid.Column="1" Text="" FontSize="10" Foreground="{StaticResource MutedBrush}" VerticalAlignment="Center" Margin="8,0,0,0" />
+                        </Grid>
+                        <Grid Grid.Row="2">
+                            <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
+                            <ProgressBar x:Name="SessionProgress" Minimum="0" Maximum="100" Height="5" Background="#263A52" Foreground="{StaticResource TealBrush}" BorderThickness="0" Margin="0,0,0,9" />
+                            <ListView x:Name="SessionList" Grid.Row="1" SelectionChanged="SessionList_SelectionChanged" Background="#0C1523" BorderBrush="{StaticResource BorderBrushSoft}" BorderThickness="1" ScrollViewer.VerticalScrollBarVisibility="Auto">
+                                <ListView.ItemTemplate>
+                                    <DataTemplate>
+                                        <Grid Margin="3,3,6,3">
+                                            <Grid.ColumnDefinitions><ColumnDefinition Width="74"/><ColumnDefinition Width="*"/><ColumnDefinition Width="110"/></Grid.ColumnDefinitions>
+                                            <StackPanel><TextBlock Text="{Binding TimeLabel}" FontSize="11" FontWeight="SemiBold"/><TextBlock Text="{Binding DurationLabel}" FontSize="9" Foreground="{StaticResource MutedBrush}" Margin="0,3,0,0"/></StackPanel>
+                                            <StackPanel Grid.Column="1" Margin="9,0,6,0"><TextBlock Text="{Binding SourceUri}" FontSize="10" TextTrimming="CharacterEllipsis"/><TextBlock Text="{Binding Progress.ActivityMessage, TargetNullValue='Sessão salva no projeto'}" FontSize="9" Foreground="{StaticResource MutedBrush}" TextTrimming="CharacterEllipsis" Margin="0,3,0,0"/></StackPanel>
+                                            <TextBlock Grid.Column="2" Text="{Binding StateLabel}" FontSize="9" Foreground="{StaticResource TealBrush}" HorizontalAlignment="Right" VerticalAlignment="Center" TextWrapping="Wrap" TextAlignment="Right" />
+                                        </Grid>
+                                    </DataTemplate>
+                                </ListView.ItemTemplate>
+                            </ListView>
+                        </Grid>
+                        <StackPanel Grid.Row="3" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,10,0,0">
+                            <Button x:Name="PauseButton" Content="Ⅱ  Pausar" Click="Pause_Click" Padding="11,7" Margin="0,0,7,0" IsEnabled="False" />
+                            <Button x:Name="ResumeButton" Content="↻  Continuar do ponto salvo" Click="Resume_Click" Padding="11,7" Margin="0,0,7,0" IsEnabled="False" />
+                            <Button x:Name="NextBlockButton" Content="Próximo bloco  →" Style="{StaticResource PrimaryButton}" Click="NextBlock_Click" Padding="12,7" IsEnabled="False" />
+                        </StackPanel>
+                    </Grid>
+                </Border>
+            </Grid>
+        </Grid>
+
+        <Border x:Name="RealCapturePanel" Grid.Row="2" Visibility="Collapsed" Background="{StaticResource SurfaceBrush}" BorderBrush="{StaticResource BorderBrushSoft}" BorderThickness="1" CornerRadius="14" Padding="18">
+            <Grid>
+                <Grid.ColumnDefinitions><ColumnDefinition Width="350"/><ColumnDefinition Width="14"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                <Border Grid.Column="0" Background="#101B2A" BorderBrush="{StaticResource BorderBrushSoft}" BorderThickness="1" CornerRadius="12" Padding="16">
+                    <StackPanel>
+                        <TextBlock Text="CAPTURA REAL · JOGO" FontSize="10" FontWeight="Bold" Foreground="{StaticResource TealBrush}" />
+                        <TextBlock Text="Escolha a janela do jogo" FontSize="20" FontWeight="Bold" Margin="0,6,0,5" />
+                        <TextBlock Text="O DubSync captura a janela e abre a faixa de ferramentas sobre o jogo. Esta tela não espelha a imagem do jogo." FontSize="11" Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" Margin="0,0,0,13" />
+                        <TextBlock Text="Janela visível" FontSize="11" FontWeight="SemiBold" />
+                        <ComboBox x:Name="GameWindowSelector" DisplayMemberPath="DisplayLabel" Margin="0,5,0,0" MinHeight="34" />
+                        <Button Content="↻  Atualizar janelas" Click="RefreshGameWindows_Click" HorizontalAlignment="Left" Padding="10,6" Margin="0,8,0,13" />
+                        <Grid>
+                            <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="12"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                            <StackPanel><TextBlock Text="Idioma" FontSize="11"/><TextBox x:Name="RuntimeLanguageInput" Text="en" Margin="0,4,0,0"/></StackPanel>
+                            <StackPanel Grid.Column="2"><TextBlock Text="Análise (FPS)" FontSize="11"/><ComboBox x:Name="RuntimeFpsSelector" SelectedIndex="1" Margin="0,4,0,0"><ComboBoxItem Content="2 FPS" Tag="2"/><ComboBoxItem Content="5 FPS" Tag="5"/><ComboBoxItem Content="8 FPS" Tag="8"/><ComboBoxItem Content="10 FPS" Tag="10"/></ComboBox></StackPanel>
+                        </Grid>
+                        <TextBlock Text="A ROI inicial usa os percentuais da captura por vídeo. Depois de iniciar, ajuste, adicione ou remova áreas diretamente sobre o jogo no overlay." FontSize="10" Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" Margin="0,12,0,0" />
+                        <Button x:Name="StartRuntimeButton" Content="◎  Iniciar captura no jogo" Style="{StaticResource PrimaryButton}" Click="StartRuntimeCapture_Click" Padding="12,9" HorizontalAlignment="Stretch" Margin="0,16,0,0" />
+                        <Button x:Name="CalibrateRuntimeButton" Content="✦  Calibrar ROI com IA" Click="CalibrateRuntime_Click" Padding="12,8" HorizontalAlignment="Stretch" Margin="0,7,0,0" IsEnabled="False" />
+                        <TextBlock Text="A calibração envia até 3 frames do jogo para o modelo configurado e pede sua autorização antes do envio." FontSize="10" Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" Margin="2,6,2,0" />
+                        <TextBlock x:Name="RuntimeErrorText" Foreground="#FF777E" FontSize="11" TextWrapping="Wrap" Visibility="Collapsed" Margin="2,9,2,0" />
+                    </StackPanel>
+                </Border>
+                <Border Grid.Column="2" Background="#101B2A" BorderBrush="{StaticResource BorderBrushSoft}" BorderThickness="1" CornerRadius="12" Padding="16">
+                    <Grid>
+                        <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+                        <Grid>
+                            <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                            <StackPanel><TextBlock Text="MONITOR DA CAPTURA" FontSize="10" FontWeight="Bold" Foreground="{StaticResource MutedBrush}"/><TextBlock x:Name="RuntimeStateText" Text="Aguardando seleção de uma janela." FontSize="15" FontWeight="SemiBold" Margin="0,5,0,0"/></StackPanel>
+                            <TextBlock x:Name="RuntimeFpsText" Grid.Column="1" Text="— FPS" Foreground="{StaticResource TealBrush}" FontSize="11" FontWeight="Bold" VerticalAlignment="Center" />
+                        </Grid>
+                        <ProgressBar x:Name="RuntimeProgress" Grid.Row="1" Minimum="0" Maximum="100" Height="5" Background="#263A52" Foreground="{StaticResource TealBrush}" BorderThickness="0" Margin="0,13,0,12" />
+                        <Grid Grid.Row="2">
+                            <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
+                            <TextBlock x:Name="RuntimeStatsText" Text="Frames 0 · OCR 0 · falas 0" FontSize="10" Foreground="{StaticResource MutedBrush}" Margin="0,0,0,9" />
+                            <ListBox x:Name="RuntimeEventList" Grid.Row="1" Background="#0C1523" BorderBrush="{StaticResource BorderBrushSoft}" BorderThickness="1" ScrollViewer.VerticalScrollBarVisibility="Auto">
+                                <ListBox.ItemTemplate><DataTemplate><TextBlock Text="{Binding DisplayLabel}" FontSize="11" TextWrapping="Wrap" Margin="4,5" /></DataTemplate></ListBox.ItemTemplate>
+                            </ListBox>
+                        </Grid>
+                        <StackPanel Grid.Row="3" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,12,0,0">
+                            <Button x:Name="PauseRuntimeButton" Content="Ⅱ  Pausar" Click="PauseRuntimeCapture_Click" Padding="11,7" Margin="0,0,7,0" IsEnabled="False" />
+                            <Button x:Name="ResumeRuntimeButton" Content="▶  Retomar" Click="ResumeRuntimeCapture_Click" Padding="11,7" Margin="0,0,7,0" IsEnabled="False" />
+                            <Button x:Name="StopRuntimeButton" Content="■  Encerrar" Click="StopRuntimeCapture_Click" Padding="11,7" IsEnabled="False" />
+                        </StackPanel>
+                    </Grid>
+                </Border>
+            </Grid>
+        </Border>
+    </Grid>
+</UserControl>
