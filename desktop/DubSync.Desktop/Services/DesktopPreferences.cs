@@ -7,6 +7,7 @@ public sealed class DesktopPreferences
 {
     public int ApiPort { get; set; } = 8766;
     public double UiScale { get; set; } = 1.0;
+    public double FontScale { get; set; } = 1.0;
     public string? ActiveProjectId { get; set; }
     public string ActivePage { get; set; } = "projects";
     public string ActiveCaptureMode { get; set; } = "video";
@@ -36,7 +37,7 @@ public sealed class DesktopPreferencesStore
             {
                 var saved = JsonSerializer.Deserialize<DesktopPreferences>(File.ReadAllText(PreferencesPath));
                 if (saved is not null && saved.ApiPort is >= 1 and <= 65535 &&
-                    saved.UiScale is >= 0.8 and <= 1.6)
+                    saved.UiScale is >= 0.8 and <= 1.6 && saved.FontScale is >= 0.8 and <= 1.5)
                     return saved;
             }
         }

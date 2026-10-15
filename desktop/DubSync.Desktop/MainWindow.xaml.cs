@@ -27,6 +27,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     private string _healthSummary = "Aguardando serviço local";
     private string _apiPortInput;
     private string _uiScaleSelection;
+    private string _fontScaleSelection;
     private bool _projectsLoaded;
 
     public event PropertyChangedEventHandler? PropertyChanged;
@@ -48,6 +49,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     public string SelectedProjectLabel => SelectedProject?.Name ?? "Nenhum projeto";
     public string ApiPortInput { get => _apiPortInput; set => SetField(ref _apiPortInput, value); }
     public string UiScaleSelection { get => _uiScaleSelection; set => SetField(ref _uiScaleSelection, value); }
+    public string FontScaleSelection { get => _fontScaleSelection; set => SetField(ref _fontScaleSelection, value); }
     public string ConnectionStatus { get => _connectionStatus; private set => SetField(ref _connectionStatus, value); }
     public string HealthSummary { get => _healthSummary; private set => SetField(ref _healthSummary, value); }
     public string ApiEndpoint => _api.Endpoint;
@@ -64,9 +66,11 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         _preferences = _preferencesStore.Load();
         _apiPortInput = _preferences.ApiPort.ToString();
         _uiScaleSelection = _preferences.UiScale.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture);
+        _fontScaleSelection = _preferences.FontScale.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture);
         _api = new DubSyncApiClient(_preferences.ApiPort);
         InitializeComponent();
         DataContext = this;
+        RootGrid.AddHandler(FrameworkElement.LoadedEvent, new RoutedEventHandler(FontElement_Loaded), true);
         RestoreWindowBounds();
         InitializeLayoutPersistence();
         LoadDockContent(DockManager.Layout);
@@ -277,9 +281,16 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             ShowError("Escala inválida", "Escolha uma escala entre 80% e 160%.");
             return;
         }
+        if (!double.TryParse(FontScaleSelection, System.Globalization.NumberStyles.Number,
+                System.Globalization.CultureInfo.InvariantCulture, out var fontScale) || fontScale is < 0.8 or > 1.5)
+        {
+            ShowError("Tamanho de fonte inválido", "Escolha um dos tamanhos de fonte disponíveis.");
+            return;
+        }
 
         _preferences.ApiPort = port;
         _preferences.UiScale = scale;
+        _preferences.FontScale = fontScale;
         try
         {
             _preferencesStore.Save(_preferences);
@@ -297,7 +308,17 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         }
     }
 
-    private void ApplyUiScale() => RootGrid.LayoutTransform = new ScaleTransform(_preferences.UiScale, _preferences.UiScale);
+    private void ApplyUiScale()
+    {
+        RootGrid.LayoutTransform = new ScaleTransform(_preferences.UiScale, _preferences.UiScale);
+        FontScalingService.Apply(RootGrid, _preferences.FontScale);
+    }
+
+    private void FontElement_Loaded(object sender, RoutedEventArgs e)
+    {
+        if (e.OriginalSource is DependencyObject element)
+            FontScalingService.ApplyLoadedElement(element);
+    }
 
     private void SetWorkspace(string page)
     {

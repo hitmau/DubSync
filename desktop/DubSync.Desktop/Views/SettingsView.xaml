@@ -6,7 +6,7 @@
         <StackPanel Margin="34,28,34,34" MaxWidth="760" HorizontalAlignment="Left">
             <TextBlock Text="PREFERÊNCIAS DO DESKTOP" FontSize="10" FontWeight="Bold" Foreground="{StaticResource TealBrush}" />
             <TextBlock Text="Configurações" FontSize="29" FontWeight="Bold" Margin="0,6,0,4" />
-            <TextBlock Text="Ajuste a conexão com o serviço DubSync e a escala visual da interface nativa." FontSize="13" Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" Margin="0,0,0,22" />
+            <TextBlock Text="Ajuste a conexão com o serviço DubSync, o zoom da interface e o tamanho dos textos." FontSize="13" Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" Margin="0,0,0,22" />
 
             <Border Background="{StaticResource SurfaceBrush}" BorderBrush="{StaticResource BorderBrushSoft}" BorderThickness="1" CornerRadius="13" Padding="21" Margin="0,0,0,14">
                 <StackPanel>
@@ -19,14 +19,29 @@
 
             <Border Background="{StaticResource SurfaceBrush}" BorderBrush="{StaticResource BorderBrushSoft}" BorderThickness="1" CornerRadius="13" Padding="21" Margin="0,0,0,14">
                 <StackPanel>
-                    <TextBlock Text="Escala da interface" FontSize="16" FontWeight="SemiBold" />
-                    <TextBlock Text="Ajuste a leitura para sua tela e distância de uso. O Windows continua controlando o DPI do monitor." FontSize="12" Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" Margin="0,5,0,16" />
-                    <ComboBox Width="190" HorizontalAlignment="Left" SelectedValue="{Binding UiScaleSelection, UpdateSourceTrigger=PropertyChanged}" SelectedValuePath="Tag">
-                        <ComboBoxItem Content="100%" Tag="1" />
-                        <ComboBoxItem Content="110%" Tag="1.1" />
-                        <ComboBoxItem Content="125%" Tag="1.25" />
-                        <ComboBoxItem Content="150%" Tag="1.5" />
-                    </ComboBox>
+                    <TextBlock Text="Aparência e leitura" FontSize="16" FontWeight="SemiBold" />
+                    <TextBlock Text="Zoom e fonte são independentes. O Windows continua controlando o DPI do monitor." FontSize="12" Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" Margin="0,5,0,16" />
+                    <Grid>
+                        <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                        <StackPanel>
+                            <TextBlock Text="Escala da interface" FontSize="12" FontWeight="SemiBold" />
+                            <ComboBox Width="190" HorizontalAlignment="Left" Margin="0,6,18,0" SelectedValue="{Binding UiScaleSelection, UpdateSourceTrigger=PropertyChanged}" SelectedValuePath="Tag">
+                                <ComboBoxItem Content="100%" Tag="1" />
+                                <ComboBoxItem Content="110%" Tag="1.1" />
+                                <ComboBoxItem Content="125%" Tag="1.25" />
+                                <ComboBoxItem Content="150%" Tag="1.5" />
+                            </ComboBox>
+                        </StackPanel>
+                        <StackPanel Grid.Column="1">
+                            <TextBlock Text="Tamanho da fonte" FontSize="12" FontWeight="SemiBold" />
+                            <ComboBox Width="190" HorizontalAlignment="Left" Margin="0,6,0,0" SelectedValue="{Binding FontScaleSelection, UpdateSourceTrigger=PropertyChanged}" SelectedValuePath="Tag">
+                                <ComboBoxItem Content="Compacto" Tag="0.9" />
+                                <ComboBoxItem Content="Normal" Tag="1" />
+                                <ComboBoxItem Content="Grande" Tag="1.15" />
+                                <ComboBoxItem Content="Muito grande" Tag="1.3" />
+                            </ComboBox>
+                        </StackPanel>
+                    </Grid>
                 </StackPanel>
             </Border>
 
