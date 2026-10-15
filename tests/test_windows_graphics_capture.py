@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import sys
 import time
 import unittest
@@ -12,6 +13,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from Dupsync.capture.runtime_capture import LiveScreenFrameSource, live_capture_processing_settings
 from Dupsync.capture.windows_graphics_capture import WindowsGraphicsCaptureStream
+from Dupsync.capture.windows_gpu_metrics import WindowsGpuUsageSampler
 
 
 class _FakeFrame:
@@ -69,6 +71,32 @@ class _FakeStream:
 
 
 class WindowsGraphicsCaptureTests(unittest.TestCase):
+    def test_gpu_sampler_aggregates_only_target_process_and_caps_result(self):
+        samples = [
+            ("pid_42_luid_1_engtype_3d", 24.5),
+            ("pid_42_luid_1_engtype_copy", 21.0),
+            ("pid_420_luid_1_engtype_3d", 90.0),
+        ]
+
+        self.assertEqual(WindowsGpuUsageSampler.aggregate_usage(42, samples), 45.5)
+        self.assertEqual(WindowsGpuUsageSampler.aggregate_usage(420, samples), 90.0)
+        self.assertEqual(WindowsGpuUsageSampler.aggregate_usage(
+            42, [("pid_42_luid_1_engtype_3d", 120.0)]), 100.0)
+        self.assertEqual(WindowsGpuUsageSampler.aggregate_usage(42, [
+            ("pid_42_luid_1_engtype_3d", "not-a-number"),
+            ("pid_42_luid_1_engtype_copy", float("nan")),
+            ("pid_42_luid_1_engtype_compute", -4),
+        ]), 0.0)
+
+    @unittest.skipUnless(sys.platform == "win32", "PDH está disponível apenas no Windows")
+    def test_windows_pdh_gpu_counter_can_be_sampled_and_closed(self):
+        sampler = WindowsGpuUsageSampler(os.getpid())
+        try:
+            value = sampler.read()
+            self.assertTrue(value is None or 0 <= value <= 100)
+        finally:
+            sampler.close()
+
     def test_latest_frame_is_copied_from_native_buffer_and_stops_cleanly(self):
         pixels = np.full((7, 11, 3), 27, dtype=np.uint8)
         capture = _FakeCapture(pixels=pixels)

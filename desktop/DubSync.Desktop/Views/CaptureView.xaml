@@ -209,7 +209,7 @@
                         <Grid Grid.Row="2">
                             <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
                             <TextBlock x:Name="RuntimeStatsText" Text="Frames 0 · OCR 0 · falas 0" FontSize="10" Foreground="{StaticResource MutedBrush}" Margin="0,0,0,9" />
-                            <TextBlock x:Name="RuntimePerfText" Grid.Row="1" Text="Real: captura — · análise — FPS · serviço —% CPU · — MB RAM" FontSize="10" Foreground="{StaticResource TealBrush}" Margin="0,0,0,8" />
+                            <TextBlock x:Name="RuntimePerfText" Grid.Row="1" Text="Real: captura — · análise — FPS · serviço —% CPU · —% GPU · — MB RAM" FontSize="10" Foreground="{StaticResource TealBrush}" TextWrapping="Wrap" Margin="0,0,0,8" />
                             <ListBox x:Name="RuntimeEventList" Grid.Row="2" Background="#0C1523" BorderBrush="{StaticResource BorderBrushSoft}" BorderThickness="1" ScrollViewer.VerticalScrollBarVisibility="Auto">
                                 <ListBox.ItemTemplate><DataTemplate><TextBlock Text="{Binding DisplayLabel}" FontSize="11" TextWrapping="Wrap" Margin="4,5" /></DataTemplate></ListBox.ItemTemplate>
                             </ListBox>

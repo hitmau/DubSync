@@ -30,6 +30,7 @@ from .windows_graphics_capture import (
     WindowsGraphicsCaptureStream,
     windows_graphics_capture_available,
 )
+from .windows_gpu_metrics import WindowsGpuUsageSampler
 
 
 def live_capture_processing_settings(settings: dict, analysis_fps: float | None = None) -> dict:
@@ -302,6 +303,8 @@ class RuntimeCaptureJob:
         self._next_duration_update = 0.0
         self._process = psutil.Process(os.getpid())
         self._process.cpu_percent(interval=None)
+        self._gpu_sampler = (WindowsGpuUsageSampler(os.getpid())
+                             if self.source.capture_backend == "windows_graphics_capture" else None)
 
     def launch(self) -> None:
         self.worker = threading.Thread(target=self._run, name=f"DubSyncGame-{self.session_id[:8]}", daemon=True)
@@ -343,6 +346,8 @@ class RuntimeCaptureJob:
             self.store.set_session_state(self.session_id, "failed", self.error)
         finally:
             self.source.close()
+            if self._gpu_sampler:
+                self._gpu_sampler.close()
             reset_project_context(token)
             if self.on_complete:
                 self.on_complete(self.session_id)
@@ -357,6 +362,7 @@ class RuntimeCaptureJob:
                 memory_mb = None
             capture_fps_actual = (self.source._graphics_capture.observed_fps
                                   if self.source._graphics_capture else self.source.observed_analysis_fps)
+            gpu_percent = self._gpu_sampler.read() if self._gpu_sampler else None
             return {"session_id": self.session_id,
                     "state": "stopping" if self.source._stop.is_set() and self.worker and self.worker.is_alive()
                     else ("paused" if self.source.paused and self.worker and self.worker.is_alive()
@@ -370,6 +376,7 @@ class RuntimeCaptureJob:
                     "analysis_fps_actual": self.source.observed_analysis_fps,
                     "capture_fps_actual": capture_fps_actual,
                     "cpu_percent": cpu_percent,
+                    "gpu_percent": gpu_percent,
                     "memory_mb": memory_mb,
                     "capture_backend": self.source.capture_backend}
 
