@@ -88,6 +88,12 @@
                             <Image x:Name="PreviewImage" Stretch="Uniform" Visibility="Collapsed" />
                             <MediaElement x:Name="VideoPlayer" LoadedBehavior="Manual" UnloadedBehavior="Manual" Stretch="Uniform" Visibility="Collapsed" MediaOpened="VideoPlayer_MediaOpened" MediaFailed="VideoPlayer_MediaFailed" />
                             <Canvas x:Name="RoiCanvas" Background="Transparent" ClipToBounds="True" SizeChanged="RoiCanvas_SizeChanged" MouseLeftButtonDown="RoiCanvas_MouseLeftButtonDown" MouseMove="RoiCanvas_MouseMove" MouseLeftButtonUp="RoiCanvas_MouseLeftButtonUp" />
+                            <Border x:Name="PlaybackCaptionPanel" VerticalAlignment="Bottom" HorizontalAlignment="Center" MaxWidth="78%" Margin="48,0,48,36" Padding="16,9" Background="#E60A1421" BorderBrush="#704B6685" BorderThickness="1" CornerRadius="8" Visibility="Collapsed" IsHitTestVisible="False">
+                                <StackPanel>
+                                    <TextBlock x:Name="PlaybackCaptionSpeaker" FontSize="10" FontWeight="Bold" Foreground="#70D8C5" TextAlignment="Center" TextWrapping="Wrap" />
+                                    <TextBlock x:Name="PlaybackCaptionText" FontSize="16" FontWeight="SemiBold" Foreground="White" TextAlignment="Center" TextWrapping="Wrap" MaxWidth="820" />
+                                </StackPanel>
+                            </Border>
                             <StackPanel x:Name="PreviewPlaceholder" HorizontalAlignment="Center" VerticalAlignment="Center" MaxWidth="380" IsHitTestVisible="False">
                                 <TextBlock Text="PREVIEW DO BLOCO" FontSize="10" FontWeight="Bold" Foreground="{StaticResource TealBrush}" HorizontalAlignment="Center" />
                                 <TextBlock Text="Escolha um vídeo e pré-visualize o frame do início." FontSize="13" Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" TextAlignment="Center" Margin="0,8,0,0" />

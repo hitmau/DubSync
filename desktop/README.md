@@ -5,7 +5,7 @@ Aplicação nativa WPF (.NET 10) em desenvolvimento ao lado do serviço Python a
 ## Estado da migração
 
 - **Fase 0:** shell nativo, navegação, painéis encaixáveis, layouts persistidos, escala da interface, projetos e configurações. A verificação visual em DPI alto ainda está pendente.
-- **Fase 1 — primeira fatia:** player de vídeo local com busca e velocidade, ROI desenhável, início de bloco, sessões com pausa/retomada, Captura Real e revisão de falas com evidências. A faixa sobre o jogo permite criar, mover, redimensionar e remover ROIs; a calibração por IA pede consentimento para enviar até três frames e só aplica a sugestão à primeira ROI depois de confirmação.
+- **Fase 1 — primeira fatia:** player de vídeo local com busca, velocidades de 0,5× a 5× e legendas sincronizadas aos tempos salvos; ROI desenhável; início de bloco; sessões com pausa/retomada; Captura Real; e revisão de falas com evidências. A faixa sobre o jogo permite criar, mover, redimensionar e remover ROIs; a calibração por IA pede consentimento para enviar até três frames e só aplica a sugestão à primeira ROI depois de confirmação.
 - **Compatibilidade:** YouTube permanece na Captura clássica; Dublagem e Integração abrem os módulos atuais até a migração nativa dessas áreas.
 - **Captura Real:** o desktop chama as rotas `api/runtime-capture/*`; o serviço Python abre o overlay sobre o jogo e continua responsável pelo monitor visual e OCR. O desktop não espelha o jogo. O encadeamento OCR→correspondência→take e a medição de impacto no FPS ainda precisam de validação end-to-end. A calibração também depende da chave e do modelo de IA configurados no serviço.
 

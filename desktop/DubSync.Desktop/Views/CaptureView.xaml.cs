@@ -25,6 +25,7 @@ public partial class CaptureView : UserControl, INotifyPropertyChanged
     private readonly ObservableCollection<CaptureSession> _sessions = [];
     private readonly ObservableCollection<RuntimeWindow> _runtimeWindows = [];
     private readonly ObservableCollection<RuntimePendingEvent> _runtimeEvents = [];
+    private List<ReviewEvent> _playbackEvents = [];
     private readonly DispatcherTimer _pollTimer;
     private readonly DispatcherTimer _playerTimer;
     private readonly DispatcherTimer _runtimePollTimer;
@@ -60,6 +61,7 @@ public partial class CaptureView : UserControl, INotifyPropertyChanged
     private double _naturalWidth;
     private double _naturalHeight;
     private string? _loadedVideoPath;
+    private string? _playbackEventsSessionId;
     private string? _runtimeSessionId;
     private CaptureSession? _selectedSession;
     private string _projectLabel;
@@ -240,6 +242,7 @@ public partial class CaptureView : UserControl, INotifyPropertyChanged
     {
         if (PlayerTimeline is null) return;
         PlayerTimeText.Text = $"{FormatTime(PlayerTimeline.Value)} / {FormatTime(PlayerTimeline.Maximum)}";
+        UpdatePlaybackCaption(PlayerTimeline.Value);
     }
 
     private void PlayerTimeline_PreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs e) => _isSeeking = true;
@@ -255,7 +258,9 @@ public partial class CaptureView : UserControl, INotifyPropertyChanged
         if (!_mediaOpened) return;
         if (!_isSeeking && PlayerTimeline.Maximum > 0)
             PlayerTimeline.Value = Math.Clamp(VideoPlayer.Position.TotalSeconds, 0, PlayerTimeline.Maximum);
-        PlayerTimeText.Text = $"{FormatTime(VideoPlayer.Position.TotalSeconds)} / {FormatTime(PlayerTimeline.Maximum)}";
+        var currentTime = VideoPlayer.Position.TotalSeconds;
+        PlayerTimeText.Text = $"{FormatTime(currentTime)} / {FormatTime(PlayerTimeline.Maximum)}";
+        UpdatePlaybackCaption(currentTime);
     }
 
     private void UsePlayhead_Click(object sender, RoutedEventArgs e)
@@ -836,6 +841,8 @@ public partial class CaptureView : UserControl, INotifyPropertyChanged
             _selectedSession = _sessions.FirstOrDefault(item => item.SessionId == previousId) ?? _sessions.FirstOrDefault();
             SessionList.SelectedItem = _selectedSession;
             UpdateSelectedSession();
+            if (_selectedSession is not null) await RefreshPlaybackEventsAsync(_selectedSession);
+            else ClearPlaybackEvents();
             if (_selectedSession is not null && (_selectedSession.SessionId != previousId || PreviewImage.Source is null))
                 await PreviewSessionSourceAsync(_selectedSession);
             if (_sessions.Any(session => session.IsRunning) && _loaded) _pollTimer.Start();
@@ -852,7 +859,95 @@ public partial class CaptureView : UserControl, INotifyPropertyChanged
     {
         _selectedSession = SessionList.SelectedItem as CaptureSession;
         UpdateSelectedSession();
-        if (_selectedSession is not null) await PreviewSessionSourceAsync(_selectedSession);
+        if (_selectedSession is not null)
+        {
+            await RefreshPlaybackEventsAsync(_selectedSession);
+            await PreviewSessionSourceAsync(_selectedSession);
+        }
+        else ClearPlaybackEvents();
+    }
+
+    private async Task RefreshPlaybackEventsAsync(CaptureSession session)
+    {
+        if (session.SourceType == "game")
+        {
+            ClearPlaybackEvents();
+            return;
+        }
+        if (_playbackEventsSessionId == session.SessionId) return;
+
+        _playbackEventsSessionId = session.SessionId;
+        _playbackEvents = [];
+        UpdatePlaybackCaption(_mediaOpened ? VideoPlayer.Position.TotalSeconds : PlayerTimeline.Value);
+        try
+        {
+            var events = await _api.GetEventsAsync(session.SessionId);
+            if (_selectedSession?.SessionId != session.SessionId) return;
+            _playbackEvents = events
+                .Where(item => item.ReviewStatus is not ("discarded" or "merged"))
+                .OrderBy(item => item.StartTime)
+                .ToList();
+            UpdatePlaybackCaption(_mediaOpened ? VideoPlayer.Position.TotalSeconds : PlayerTimeline.Value);
+        }
+        catch
+        {
+            if (_selectedSession?.SessionId != session.SessionId) return;
+            _playbackEventsSessionId = null;
+            _playbackEvents = [];
+            UpdatePlaybackCaption(_mediaOpened ? VideoPlayer.Position.TotalSeconds : PlayerTimeline.Value);
+        }
+    }
+
+    private void ClearPlaybackEvents()
+    {
+        _playbackEventsSessionId = null;
+        _playbackEvents = [];
+        UpdatePlaybackCaption(_mediaOpened ? VideoPlayer.Position.TotalSeconds : PlayerTimeline.Value);
+    }
+
+    private void UpdatePlaybackCaption(double sourceTime)
+    {
+        if (PlaybackCaptionPanel is null) return;
+        var sessionPath = _selectedSession is null ? null : GetSessionVideoPath(_selectedSession);
+        if (string.IsNullOrWhiteSpace(sessionPath) || string.IsNullOrWhiteSpace(_loadedVideoPath) ||
+            !Path.IsPathRooted(sessionPath) || !Path.IsPathRooted(_loadedVideoPath))
+        {
+            PlaybackCaptionPanel.Visibility = Visibility.Collapsed;
+            return;
+        }
+        try
+        {
+            if (!string.Equals(Path.GetFullPath(sessionPath), Path.GetFullPath(_loadedVideoPath), StringComparison.OrdinalIgnoreCase))
+            {
+                PlaybackCaptionPanel.Visibility = Visibility.Collapsed;
+                return;
+            }
+        }
+        catch (ArgumentException)
+        {
+            PlaybackCaptionPanel.Visibility = Visibility.Collapsed;
+            return;
+        }
+
+        ReviewEvent? active = null;
+        for (var index = 0; index < _playbackEvents.Count; index++)
+        {
+            var item = _playbackEvents[index];
+            var inferredEnd = item.EndTime ?? (index + 1 < _playbackEvents.Count
+                ? _playbackEvents[index + 1].StartTime : double.PositiveInfinity);
+            if (sourceTime >= item.StartTime && sourceTime <= inferredEnd && !string.IsNullOrWhiteSpace(item.TextForList))
+                active = item;
+        }
+
+        if (active is null)
+        {
+            PlaybackCaptionPanel.Visibility = Visibility.Collapsed;
+            return;
+        }
+        PlaybackCaptionSpeaker.Text = active.Character ?? "";
+        PlaybackCaptionSpeaker.Visibility = string.IsNullOrWhiteSpace(active.Character) ? Visibility.Collapsed : Visibility.Visible;
+        PlaybackCaptionText.Text = active.TextForList;
+        PlaybackCaptionPanel.Visibility = Visibility.Visible;
     }
 
     private async Task PreviewSessionSourceAsync(CaptureSession session)
