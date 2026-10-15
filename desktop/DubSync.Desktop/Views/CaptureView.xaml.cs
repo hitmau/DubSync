@@ -53,6 +53,8 @@ public partial class CaptureView : UserControl, INotifyPropertyChanged
     private bool _runtimeRefreshing;
     private bool _isPlaying;
     private bool _isSeeking;
+    private bool _isBusy;
+    private bool _youtubeSourceSelected;
     private bool _roiDragging;
     private RoiDragMode _roiDragMode;
     private Point _roiPointerStart;
@@ -61,6 +63,7 @@ public partial class CaptureView : UserControl, INotifyPropertyChanged
     private double _naturalWidth;
     private double _naturalHeight;
     private string? _loadedVideoPath;
+    private string? _previewSessionId;
     private string? _playbackEventsSessionId;
     private string? _runtimeSessionId;
     private RuntimeOverlayWindow? _runtimeOverlay;
@@ -84,6 +87,7 @@ public partial class CaptureView : UserControl, INotifyPropertyChanged
         RoiCanvas.Children.Add(_roiResizeHandle);
         LanguageInput.Text = string.IsNullOrWhiteSpace(project.CaptureLanguage) ? "en" : project.CaptureLanguage;
         RuntimeLanguageInput.Text = LanguageInput.Text;
+        SetVideoSourceMode(youtube: false);
         _api.SetProjectScope(project.ProjectId);
         _pollTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(2) };
         _pollTimer.Tick += async (_, _) =>
@@ -99,6 +103,7 @@ public partial class CaptureView : UserControl, INotifyPropertyChanged
         _runtimePollTimer.Tick += async (_, _) => await RefreshRuntimeStatusAsync();
         PlaybackSpeed.SelectedIndex = 2;
         UpdateRoiOverlay();
+        UpdateSourceActionAvailability();
     }
 
     private async void View_Loaded(object sender, RoutedEventArgs e)
@@ -120,6 +125,7 @@ public partial class CaptureView : UserControl, INotifyPropertyChanged
 
     private void ChooseFile_Click(object sender, RoutedEventArgs e)
     {
+        SetVideoSourceMode(youtube: false);
         var picker = new OpenFileDialog
         {
             Title = "Escolher vídeo para captura",
@@ -133,6 +139,99 @@ public partial class CaptureView : UserControl, INotifyPropertyChanged
             VideoDurationText.Text = "Arquivo selecionado. Carregando duração do vídeo…";
             ClearError();
         }
+    }
+
+    private void FilePathInput_TextChanged(object sender, TextChangedEventArgs e) => UpdateSourceActionAvailability();
+
+    private void LocalSourceMode_Click(object sender, RoutedEventArgs e) => SetVideoSourceMode(youtube: false);
+
+    private void YoutubeSourceMode_Click(object sender, RoutedEventArgs e) => SetVideoSourceMode(youtube: true);
+
+    private void SetVideoSourceMode(bool youtube)
+    {
+        _youtubeSourceSelected = youtube;
+        LocalSourcePanel.Visibility = youtube ? Visibility.Collapsed : Visibility.Visible;
+        YoutubeSourcePanel.Visibility = youtube ? Visibility.Visible : Visibility.Collapsed;
+        if (youtube)
+        {
+            YoutubeSourceModeButton.Style = (Style)FindResource("PrimaryButton");
+            LocalSourceModeButton.ClearValue(StyleProperty);
+            StartCaptureButton.Content = "▶  Iniciar análise do YouTube";
+            if (_selectedSession is { SourceType: "youtube" })
+                UpdateYoutubeStatus(_selectedSession);
+        }
+        else
+        {
+            LocalSourceModeButton.Style = (Style)FindResource("PrimaryButton");
+            YoutubeSourceModeButton.ClearValue(StyleProperty);
+            StartCaptureButton.Content = "▶  Iniciar bloco";
+        }
+        UpdateSourceActionAvailability();
+    }
+
+    private async void PrepareYoutube_Click(object sender, RoutedEventArgs e)
+    {
+        var url = YoutubeUrlInput.Text.Trim();
+        if (url.Length < 12)
+        {
+            SetError("Cole o link completo do vídeo do YouTube.");
+            return;
+        }
+        if (!TryReadNumber(StartInput.Text, out var start) || start < 0 ||
+            !TryReadNumber(BlockMinutesInput.Text, out var minutes) || minutes <= 0 || minutes > 240)
+        {
+            SetError("Informe início válido e tamanho de bloco entre 0 e 240 minutos.");
+            return;
+        }
+        var language = LanguageInput.Text.Trim();
+        if (language.Length < 2 || language.Length > 16)
+        {
+            SetError("Informe um código de idioma como en, pt-BR ou es-MX.");
+            return;
+        }
+
+        try
+        {
+            SetVideoSourceMode(youtube: true);
+            SetBusy(true, "Preparando o vídeo do YouTube na biblioteca local…");
+            YoutubeSourceStatusText.Text = "Download iniciado. A sessão ficará visível na lista enquanto o vídeo é preparado.";
+            _previewSessionId = null;
+            ResetVideoPreview("Aguardando o download do YouTube…");
+            var response = await _api.PrepareYoutubeAsync(url, start, minutes * 60, language);
+            var sessionId = response.TryGetProperty("session_id", out var idValue) ? idValue.GetString() : null;
+            if (string.IsNullOrWhiteSpace(sessionId))
+                throw new InvalidOperationException("A API não retornou o identificador da sessão do YouTube.");
+            await RefreshSessionsAsync(false, sessionId);
+            _pollTimer.Start();
+            ClearError();
+        }
+        catch (Exception exception)
+        {
+            SetError(exception.Message);
+            YoutubeSourceStatusText.Text = "Não foi possível preparar este vídeo.";
+        }
+        finally { SetBusy(false); }
+    }
+
+    private async void StopYoutube_Click(object sender, RoutedEventArgs e)
+    {
+        if (_selectedSession is not { SourceType: "youtube" } session) return;
+        var answer = MessageBox.Show(Window.GetWindow(this),
+            "Encerrar esta sessão do YouTube? O download e os diálogos já salvos serão preservados, mas o bloco pode ficar incompleto.",
+            "Encerrar sessão", MessageBoxButton.YesNo, MessageBoxImage.Warning);
+        if (answer != MessageBoxResult.Yes) return;
+
+        try
+        {
+            SetBusy(true, "Encerrando a sessão do YouTube…");
+            await _api.PostEmptyAsync($"api/youtube/{Uri.EscapeDataString(session.SessionId)}/stop");
+            await RefreshSessionsAsync(false, session.SessionId);
+            SetStatus("Sessão encerrada. O vídeo baixado e os diálogos já salvos foram preservados.");
+            ClearError();
+            _pollTimer.Start();
+        }
+        catch (Exception exception) { SetError(exception.Message); }
+        finally { SetBusy(false); }
     }
 
     private void LoadVideoFile(string path)
@@ -396,6 +495,17 @@ public partial class CaptureView : UserControl, INotifyPropertyChanged
 
     private async Task PreviewSourceAsync()
     {
+        if (_youtubeSourceSelected)
+        {
+            if (_selectedSession is not { SourceType: "youtube", ReadyForCalibration: true })
+            {
+                SetError("Prepare o vídeo do YouTube e aguarde o download terminar antes de pré-visualizar.");
+                return;
+            }
+            await PreviewSessionSourceAsync(_selectedSession);
+            return;
+        }
+
         var path = FilePathInput.Text.Trim();
         if (path.Length == 0)
         {
@@ -433,7 +543,7 @@ public partial class CaptureView : UserControl, INotifyPropertyChanged
 
     private async void StartCapture_Click(object sender, RoutedEventArgs e)
     {
-        if (string.IsNullOrWhiteSpace(FilePathInput.Text))
+        if (!_youtubeSourceSelected && string.IsNullOrWhiteSpace(FilePathInput.Text))
         {
             SetError("Escolha um vídeo antes de iniciar a análise.");
             return;
@@ -461,18 +571,39 @@ public partial class CaptureView : UserControl, INotifyPropertyChanged
         try
         {
             SetBusy(true, "Iniciando o bloco…");
-            var body = new
+            var regions = new[]
             {
-                path = FilePathInput.Text.Trim(),
-                start,
-                duration = minutes * 60,
-                language,
-                regions = new[] { new { x = x / 100, y = y / 100, width = width / 100, height = height / 100, name = "dialogue" } }
+                new { x = x / 100, y = y / 100, width = width / 100, height = height / 100, name = "dialogue" }
             };
-            var response = await _api.PostAsync("api/file/start", body);
+            System.Text.Json.JsonElement response;
+            if (_youtubeSourceSelected)
+            {
+                if (_selectedSession is null || !_selectedSession.CanStartYoutubeAnalysis)
+                    throw new InvalidOperationException("Prepare um vídeo do YouTube e aguarde o download antes de iniciar a análise.");
+                if (Math.Abs(start - _selectedSession.SourceStart) > 0.001 ||
+                    Math.Abs(minutes * 60 - _selectedSession.RequestedDuration) > 0.001)
+                    throw new InvalidOperationException("O início ou o tamanho do bloco mudou depois do download. Clique em Preparar vídeo do YouTube novamente para aplicar os novos valores.");
+                response = await _api.PostAsync(
+                    $"api/youtube/{Uri.EscapeDataString(_selectedSession.SessionId)}/start",
+                    new { screen_bbox = (object?)null, regions });
+            }
+            else
+            {
+                var body = new
+                {
+                    path = FilePathInput.Text.Trim(),
+                    start,
+                    duration = minutes * 60,
+                    language,
+                    regions
+                };
+                response = await _api.PostAsync("api/file/start", body);
+            }
             var sessionId = response.TryGetProperty("session_id", out var idValue) ? idValue.GetString() : null;
             await RefreshSessionsAsync(false, sessionId);
-            SetStatus("O bloco foi enviado ao processamento. A API continuará trabalhando em segundo plano.");
+            SetStatus(_youtubeSourceSelected
+                ? "A análise do bloco do YouTube foi iniciada na sessão local."
+                : "O bloco foi enviado ao processamento. A API continuará trabalhando em segundo plano.");
             ClearError();
             _pollTimer.Start();
         }
@@ -488,8 +619,12 @@ public partial class CaptureView : UserControl, INotifyPropertyChanged
         if (_selectedSession is null) return;
         try
         {
-            await _api.PostEmptyAsync($"api/file/{Uri.EscapeDataString(_selectedSession.SessionId)}/pause");
-            SetStatus("Pausa solicitada. A leitura atual será concluída e o ponto seguro ficará salvo.");
+            var isYoutube = _selectedSession.SourceType == "youtube";
+            var route = isYoutube ? "api/youtube" : "api/file";
+            await _api.PostEmptyAsync($"{route}/{Uri.EscapeDataString(_selectedSession.SessionId)}/pause");
+            SetStatus(isYoutube
+                ? "Pausa solicitada. A fala atual do YouTube será concluída antes de pausar."
+                : "Pausa solicitada. A leitura atual será concluída e o ponto seguro ficará salvo.");
             _pollTimer.Start();
             await RefreshSessionsAsync(false, _selectedSession.SessionId);
         }
@@ -502,8 +637,11 @@ public partial class CaptureView : UserControl, INotifyPropertyChanged
         try
         {
             var sessionId = _selectedSession.SessionId;
-            await _api.PostEmptyAsync($"api/file/{Uri.EscapeDataString(sessionId)}/resume");
-            SetStatus("O bloco está continuando a partir do ponto de pausa salvo.");
+            var route = _selectedSession.SourceType == "youtube" ? "api/youtube" : "api/file";
+            await _api.PostEmptyAsync($"{route}/{Uri.EscapeDataString(sessionId)}/resume");
+            SetStatus(_selectedSession.SourceType == "youtube"
+                ? "O processamento do vídeo do YouTube está sendo retomado."
+                : "O bloco está continuando a partir do ponto de pausa salvo.");
             _pollTimer.Start();
             await RefreshSessionsAsync(false, sessionId);
         }
@@ -515,17 +653,42 @@ public partial class CaptureView : UserControl, INotifyPropertyChanged
         if (_selectedSession is null || !TryReadNumber(BlockMinutesInput.Text, out var minutes) || minutes <= 0) return;
         try
         {
-            var response = await _api.PostAsync("api/file/next-block", new
+            string? sessionId;
+            if (_selectedSession.SourceType == "youtube")
             {
-                previous_session_id = _selectedSession.SessionId,
-                duration_seconds = minutes * 60
-            });
-            var sessionId = response.TryGetProperty("session_id", out var idValue) ? idValue.GetString() : null;
+                var previous = _selectedSession;
+                var config = previous.Config;
+                var url = ReadString(config, "url");
+                if (string.IsNullOrWhiteSpace(url)) url = previous.SourceUri;
+                var previousDuration = ReadDouble(config, "duration");
+                if (previousDuration <= 0) previousDuration = previous.RequestedDuration;
+                var nextStart = previous.SourceStart + previousDuration;
+                var videoDuration = ReadDouble(config, "video_duration");
+                if (videoDuration > 0 && nextStart >= videoDuration - 0.001)
+                    throw new InvalidOperationException("A análise já alcançou o final do vídeo do YouTube.");
+
+                SetVideoSourceMode(youtube: true);
+                YoutubeUrlInput.Text = url;
+                StartInput.Text = nextStart.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture);
+                SetBusy(true, "Preparando o próximo bloco do YouTube…");
+                var response = await _api.PrepareYoutubeAsync(url, nextStart, minutes * 60, previous.Language);
+                sessionId = response.TryGetProperty("session_id", out var idValue) ? idValue.GetString() : null;
+            }
+            else
+            {
+                var response = await _api.PostAsync("api/file/next-block", new
+                {
+                    previous_session_id = _selectedSession.SessionId,
+                    duration_seconds = minutes * 60
+                });
+                sessionId = response.TryGetProperty("session_id", out var idValue) ? idValue.GetString() : null;
+            }
             SetStatus("O próximo bloco começou depois do ponto final do bloco selecionado.");
             await RefreshSessionsAsync(false, sessionId);
             _pollTimer.Start();
         }
         catch (Exception exception) { SetError(exception.Message); }
+        finally { SetBusy(false); }
     }
 
     private async void Refresh_Click(object sender, RoutedEventArgs e) => await RefreshSessionsAsync(true);
@@ -845,21 +1008,29 @@ public partial class CaptureView : UserControl, INotifyPropertyChanged
         _refreshing = true;
         try
         {
+            var oldSelectedId = _selectedSession?.SessionId;
             var items = await _api.GetSessionsAsync(_project.ProjectId);
-            var previousId = preferSessionId ?? _selectedSession?.SessionId;
+            var selectedId = preferSessionId ?? oldSelectedId;
             _sessions.Clear();
             foreach (var item in items) _sessions.Add(item);
             SessionSummaryText.Text = _sessions.Count == 0
                 ? "Nenhum bloco foi capturado neste projeto ainda."
                 : $"{_sessions.Count} sessão(ões) · dados carregados da API do projeto";
 
-            _selectedSession = _sessions.FirstOrDefault(item => item.SessionId == previousId) ?? _sessions.FirstOrDefault();
+            _selectedSession = _sessions.FirstOrDefault(item => item.SessionId == selectedId) ?? _sessions.FirstOrDefault();
             SessionList.SelectedItem = _selectedSession;
+            if (_selectedSession?.SessionId != oldSelectedId)
+                ApplySessionSourceMode(_selectedSession);
             UpdateSelectedSession();
             if (_selectedSession is not null) await RefreshPlaybackEventsAsync(_selectedSession);
             else ClearPlaybackEvents();
-            if (_selectedSession is not null && (_selectedSession.SessionId != previousId || PreviewImage.Source is null))
-                await PreviewSessionSourceAsync(_selectedSession);
+            if (_selectedSession is not null)
+            {
+                var needsPreview = _selectedSession.SourceType == "youtube"
+                    ? _selectedSession.ReadyForCalibration && _previewSessionId != _selectedSession.SessionId
+                    : _previewSessionId != _selectedSession.SessionId || PreviewImage.Source is null;
+                if (needsPreview) await PreviewSessionSourceAsync(_selectedSession);
+            }
             if (_sessions.Any(session => session.IsRunning) && _loaded) _pollTimer.Start();
         }
         catch (Exception exception)
@@ -872,14 +1043,37 @@ public partial class CaptureView : UserControl, INotifyPropertyChanged
 
     private async void SessionList_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
+        var previousId = _selectedSession?.SessionId;
         _selectedSession = SessionList.SelectedItem as CaptureSession;
         UpdateSelectedSession();
+        if (_refreshing) return;
+        if (_selectedSession?.SessionId != previousId)
+            ApplySessionSourceMode(_selectedSession);
         if (_selectedSession is not null)
         {
             await RefreshPlaybackEventsAsync(_selectedSession);
             await PreviewSessionSourceAsync(_selectedSession);
         }
         else ClearPlaybackEvents();
+    }
+
+    private void ApplySessionSourceMode(CaptureSession? session)
+    {
+        if (session is null) return;
+        if (session.SourceType == "youtube")
+        {
+            SetVideoSourceMode(youtube: true);
+            var url = ReadString(session.Config, "url");
+            YoutubeUrlInput.Text = string.IsNullOrWhiteSpace(url) ? session.SourceUri : url;
+            StartInput.Text = session.SourceStart.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture);
+            BlockMinutesInput.Text = (session.RequestedDuration / 60).ToString("0.##", System.Globalization.CultureInfo.InvariantCulture);
+            LanguageInput.Text = session.Language;
+        }
+        else if (session.SourceType == "file")
+        {
+            SetVideoSourceMode(youtube: false);
+            LanguageInput.Text = session.Language;
+        }
     }
 
     private async Task RefreshPlaybackEventsAsync(CaptureSession session)
@@ -967,14 +1161,24 @@ public partial class CaptureView : UserControl, INotifyPropertyChanged
 
     private async Task PreviewSessionSourceAsync(CaptureSession session)
     {
+        if (session.SourceType == "youtube" && !session.ReadyForCalibration)
+        {
+            if (_previewSessionId != session.SessionId)
+                ResetVideoPreview(session.State is "downloading" or "queued"
+                    ? "Baixando o vídeo do YouTube…"
+                    : "Aguardando a preparação do vídeo do YouTube…");
+            UpdateYoutubeStatus(session);
+            return;
+        }
+
         var path = GetSessionVideoPath(session);
         if (string.IsNullOrWhiteSpace(path) || !File.Exists(path))
         {
-            if (PreviewImage.Source is null)
-            {
-                PreviewPlaceholder.Visibility = Visibility.Visible;
-                PreviewMetaText.Text = "O vídeo desta sessão não está disponível neste caminho.";
-            }
+            if (_previewSessionId != session.SessionId)
+                ResetVideoPreview(session.SourceType == "youtube" && (session.State is "downloading" or "queued")
+                    ? "Baixando o vídeo do YouTube…"
+                    : "O vídeo desta sessão ainda não está disponível.");
+            if (session.SourceType == "youtube") UpdateYoutubeStatus(session);
             return;
         }
 
@@ -992,6 +1196,8 @@ public partial class CaptureView : UserControl, INotifyPropertyChanged
             }
             SetPreview(preview.Image, $"{Path.GetFileName(path)} · {FormatTime(seconds)}");
             if (_mediaOpened) VideoPlayer.Position = TimeSpan.FromSeconds(seconds);
+            _previewSessionId = session.SessionId;
+            if (session.SourceType == "youtube") UpdateYoutubeStatus(session);
             UpdateRoiOverlay();
         }
         catch
@@ -1020,6 +1226,7 @@ public partial class CaptureView : UserControl, INotifyPropertyChanged
             ProgressStatsText.Text = "";
             SessionProgress.Value = 0;
             PauseButton.IsEnabled = ResumeButton.IsEnabled = NextBlockButton.IsEnabled = false;
+            UpdateSourceActionAvailability();
             return;
         }
 
@@ -1029,9 +1236,49 @@ public partial class CaptureView : UserControl, INotifyPropertyChanged
         ProgressStatsText.Text = progress is null ? "" : $"{progress.FramesAnalyzed:N0} quadros · {progress.OcrCalls:N0} OCR · {progress.EventsCreated:N0} falas";
         SessionProgress.Value = session.IsComplete ? 100 : session.RequestedDuration > 0
             ? Math.Clamp((current - session.SourceStart) / session.RequestedDuration * 100, 0, 100) : 0;
-        PauseButton.IsEnabled = session.IsRunning;
-        ResumeButton.IsEnabled = session.CanContinue;
+        PauseButton.IsEnabled = session.SourceType == "youtube"
+            ? session.State == "processing"
+            : session.IsRunning;
+        ResumeButton.IsEnabled = session.CanContinue && session.CanContinueYoutube;
+        ResumeButton.Content = session.SourceType == "youtube" && !session.AnalysisStarted
+            ? "↻  Retomar download" : "↻  Continuar do ponto salvo";
         NextBlockButton.IsEnabled = session.IsComplete;
+        if (session.SourceType == "youtube") UpdateYoutubeStatus(session);
+        UpdateSourceActionAvailability();
+    }
+
+    private void UpdateYoutubeStatus(CaptureSession session)
+    {
+        if (session.State is "queued" or "downloading")
+        {
+            var percent = session.Progress?.Percent;
+            YoutubeSourceStatusText.Text = percent is not null
+                ? $"Baixando… {percent:0.#}% · o progresso fica salvo nesta sessão."
+                : "Baixando o vídeo para a biblioteca local…";
+            return;
+        }
+
+        if (session.CanStartYoutubeAnalysis)
+        {
+            var title = ReadString(session.Config, "video_title");
+            if (string.IsNullOrWhiteSpace(title)) title = "Vídeo preparado";
+            var width = ReadInt(session.Config, "video_width");
+            var height = ReadInt(session.Config, "video_height");
+            var dimensions = width > 0 && height > 0 ? $" · {width} × {height}" : "";
+            YoutubeSourceStatusText.Text = $"{title}{dimensions} · pronto para pré-visualizar e analisar este bloco.";
+            return;
+        }
+
+        YoutubeSourceStatusText.Text = session.State switch
+        {
+            "preparing" when session.AnalysisStarted => "Iniciando análise do bloco…",
+            "complete" => "Extração concluída. Use Próximo bloco para continuar no mesmo vídeo.",
+            "paused" => "Sessão pausada; o conteúdo baixado e o progresso foram preservados.",
+            "failed" or "stopped" => session.Progress?.ActivityMessage is { Length: > 0 } detail
+                ? detail : "Sessão interrompida. Use Retomar para continuar quando possível.",
+            _ => session.Progress?.ActivityMessage is { Length: > 0 } activity
+                ? activity : "Sessão do YouTube selecionada."
+        };
     }
 
     private void SetPreview(string? dataUri, string description)
@@ -1064,10 +1311,64 @@ public partial class CaptureView : UserControl, INotifyPropertyChanged
         UpdateRoiOverlay();
     }
 
+    private void ResetVideoPreview(string description)
+    {
+        VideoPlayer.Stop();
+        VideoPlayer.Source = null;
+        _mediaOpened = false;
+        _isPlaying = false;
+        _loadedVideoPath = null;
+        _naturalWidth = _naturalHeight = 0;
+        _previewSessionId = null;
+        _playerTimer.Stop();
+        PlayPauseButton.Content = "▶";
+        PlayPauseButton.IsEnabled = false;
+        PlayerTimeline.IsEnabled = false;
+        PlayerTimeline.Value = 0;
+        PlayerTimeline.Maximum = 1;
+        PreviewImage.Source = null;
+        PreviewImage.Visibility = Visibility.Collapsed;
+        PreviewPlaceholder.Visibility = Visibility.Visible;
+        PreviewMetaText.Text = description;
+        PlaybackCaptionPanel.Visibility = Visibility.Collapsed;
+        UpdateRoiOverlay();
+    }
+
     private void SetBusy(bool busy, string? message = null)
     {
-        StartCaptureButton.IsEnabled = !busy;
+        _isBusy = busy;
+        UpdateSourceActionAvailability();
         if (busy && message is not null) SetStatus(message);
+    }
+
+    private void UpdateSourceActionAvailability()
+    {
+        if (StartCaptureButton is null || PreviewSourceButton is null || PrepareYoutubeButton is null || StopYoutubeButton is null) return;
+
+        var hasLocalPath = !string.IsNullOrWhiteSpace(FilePathInput.Text);
+        var readyYoutube = _selectedSession is { SourceType: "youtube", CanStartYoutubeAnalysis: true };
+        var previewableYoutube = _selectedSession is { SourceType: "youtube", ReadyForCalibration: true };
+        StartCaptureButton.IsEnabled = !_isBusy && (_youtubeSourceSelected ? readyYoutube : hasLocalPath);
+        PreviewSourceButton.IsEnabled = !_isBusy && (_youtubeSourceSelected ? previewableYoutube : hasLocalPath);
+        PrepareYoutubeButton.IsEnabled = !_isBusy && _youtubeSourceSelected;
+        StopYoutubeButton.IsEnabled = !_isBusy && _youtubeSourceSelected && _selectedSession is
+            { SourceType: "youtube", State: "queued" or "downloading" or "preparing" or "running" or "processing" or "pausing" or "paused" };
+
+        if (!_youtubeSourceSelected)
+        {
+            StartCaptureButton.Content = "▶  Iniciar bloco";
+            return;
+        }
+
+        StartCaptureButton.Content = _selectedSession switch
+        {
+            { CanStartYoutubeAnalysis: true } => "▶  Iniciar análise do bloco",
+            { State: "queued" or "downloading" } => "◌  Aguardando download",
+            { State: "preparing", ReadyForCalibration: false } => "◌  Preparando vídeo",
+            { AnalysisStarted: true, IsComplete: true } => "✓  Bloco concluído",
+            { AnalysisStarted: true } => "◌  Análise em andamento",
+            _ => "▶  Prepare o vídeo do YouTube"
+        };
     }
 
     private void SetStatus(string message)

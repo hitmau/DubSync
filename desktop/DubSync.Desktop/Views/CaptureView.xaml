@@ -13,7 +13,7 @@
             </StackPanel>
             <Border Grid.Column="1" Background="#12263A" BorderBrush="{StaticResource BorderBrushSoft}" BorderThickness="1" CornerRadius="10" Padding="9,7" VerticalAlignment="Center">
                 <StackPanel Orientation="Horizontal">
-                    <Button Content="Abrir captura clássica · YouTube" Click="LegacyCapture_Click" Padding="9,5" Margin="0,0,10,0" ToolTip="Mantém acesso ao fluxo existente enquanto YouTube é migrado para a tela nativa." />
+                    <Button Content="Abrir captura clássica" Click="LegacyCapture_Click" Padding="9,5" Margin="0,0,10,0" ToolTip="Abre o workspace web legado para recursos ainda em migração." />
                     <Ellipse Width="8" Height="8" Fill="{StaticResource TealBrush}" VerticalAlignment="Center" Margin="0,0,7,0"/>
                     <TextBlock Text="Sessões preservadas" FontSize="10" Foreground="{StaticResource MutedBrush}" VerticalAlignment="Center" />
                 </StackPanel>
@@ -33,12 +33,27 @@
                     <Border Background="{StaticResource SurfaceBrush}" BorderBrush="{StaticResource BorderBrushSoft}" BorderThickness="1" CornerRadius="12" Padding="16" Margin="0,0,0,11">
                         <StackPanel>
                             <TextBlock Text="FONTE DO VÍDEO" FontSize="10" FontWeight="Bold" Foreground="{StaticResource MutedBrush}" Margin="0,0,0,10" />
-                            <TextBlock Text="Arquivo local" FontSize="12" FontWeight="SemiBold" />
-                            <Grid Margin="0,5,0,11">
-                                <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-                                <TextBox x:Name="FilePathInput" FontSize="11" Padding="8,7" VerticalContentAlignment="Center" ToolTip="Caminho local do vídeo" />
-                                <Button Grid.Column="1" Content="Procurar…" Padding="10,7" Margin="7,0,0,0" Click="ChooseFile_Click" />
-                            </Grid>
+                            <StackPanel Orientation="Horizontal" Margin="0,0,0,10">
+                                <Button x:Name="LocalSourceModeButton" Content="Arquivo local" Style="{StaticResource PrimaryButton}" Padding="11,6" Margin="0,0,7,0" Click="LocalSourceMode_Click" />
+                                <Button x:Name="YoutubeSourceModeButton" Content="YouTube" Padding="11,6" Click="YoutubeSourceMode_Click" />
+                            </StackPanel>
+                            <StackPanel x:Name="LocalSourcePanel">
+                                <TextBlock Text="Caminho do arquivo" FontSize="11" FontWeight="SemiBold" />
+                                <Grid Margin="0,5,0,0">
+                                    <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                                    <TextBox x:Name="FilePathInput" FontSize="11" Padding="8,7" VerticalContentAlignment="Center" ToolTip="Caminho local do vídeo" TextChanged="FilePathInput_TextChanged" />
+                                    <Button Grid.Column="1" Content="Procurar…" Padding="10,7" Margin="7,0,0,0" Click="ChooseFile_Click" />
+                                </Grid>
+                            </StackPanel>
+                            <StackPanel x:Name="YoutubeSourcePanel" Visibility="Collapsed">
+                                <TextBlock Text="Link do vídeo" FontSize="11" FontWeight="SemiBold" />
+                                <TextBox x:Name="YoutubeUrlInput" Margin="0,5,0,0" Padding="8,7" FontSize="11" ToolTip="Cole a URL do vídeo do YouTube" />
+                                <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
+                                    <Button x:Name="PrepareYoutubeButton" Content="↓  Preparar vídeo do YouTube" Click="PrepareYoutube_Click" Style="{StaticResource PrimaryButton}" Padding="11,7" />
+                                    <Button x:Name="StopYoutubeButton" Content="■  Encerrar sessão" Click="StopYoutube_Click" Padding="11,7" Margin="7,0,0,0" IsEnabled="False" />
+                                </StackPanel>
+                                <TextBlock x:Name="YoutubeSourceStatusText" Text="O vídeo será salvo na biblioteca local e poderá ser reutilizado em outros blocos." FontSize="10" Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" Margin="0,7,0,0" />
+                            </StackPanel>
                             <Grid>
                                 <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="12"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
                                 <StackPanel><TextBlock Text="Início (s)" FontSize="11" FontWeight="SemiBold"/><TextBox x:Name="StartInput" Text="0" Margin="0,4,0,0"/></StackPanel>
@@ -72,7 +87,7 @@
                     </Border>
 
                     <StackPanel Orientation="Horizontal">
-                        <Button Content="Pré-visualizar frame" Click="Preview_Click" Padding="12,8" Margin="0,0,8,0" />
+                        <Button x:Name="PreviewSourceButton" Content="Pré-visualizar frame" Click="Preview_Click" Padding="12,8" Margin="0,0,8,0" />
                         <Button x:Name="StartCaptureButton" Content="▶  Iniciar bloco" Style="{StaticResource PrimaryButton}" Click="StartCapture_Click" Padding="13,8" />
                     </StackPanel>
                     <TextBlock x:Name="ErrorText" Foreground="#FF777E" FontSize="11" TextWrapping="Wrap" Visibility="Collapsed" Margin="2,9,2,0" />

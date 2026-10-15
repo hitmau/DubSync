@@ -40,7 +40,7 @@ integration/plugins/replaced-articy/runtime/obj/
 
 # Local capture profiles, models, and generated recordings
 playwright-profile/
-models/
+/models/
 videos/*
 !videos/README.md
 

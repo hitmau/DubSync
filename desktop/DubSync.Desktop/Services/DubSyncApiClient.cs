@@ -121,6 +121,17 @@ public sealed class DubSyncApiClient : IDisposable
             ?? throw new InvalidOperationException("O DubSync não retornou a prévia do vídeo.");
     }
 
+    public Task<System.Text.Json.JsonElement> PrepareYoutubeAsync(string url, double start, double duration,
+        string language, int segmentDurationSeconds = 60, CancellationToken cancellationToken = default) =>
+        PostAsync("api/youtube/prepare", new
+        {
+            url,
+            start,
+            duration,
+            language,
+            segment_duration_seconds = segmentDurationSeconds
+        }, cancellationToken);
+
     public async Task<IReadOnlyList<RuntimeWindow>> GetRuntimeWindowsAsync(CancellationToken cancellationToken = default)
     {
         var result = await _http.GetFromJsonAsync<RuntimeWindowListResponse>(
