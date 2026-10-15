@@ -52,6 +52,16 @@ class RoiFeaturesTests(unittest.TestCase):
         self.assertFalse(region.active_at(190))
         self.assertTrue(region.active_at(202))
 
+    def test_disabled_roi_is_not_active_and_lock_state_survives_validation(self) -> None:
+        config = validate_regions([{
+            "name": "Legenda", "x": .1, "y": .7, "width": .8, "height": .2,
+            "enabled": False, "locked": True,
+        }])[0]
+        region = Region.from_dict(config)
+        self.assertFalse(region.active_at(0))
+        self.assertTrue(region.locked)
+        self.assertFalse(config["enabled"])
+
     def test_motion_interpolates_position_and_size(self) -> None:
         config = validate_regions([{
             "x": .1, "y": .2, "width": .3, "height": .1,

@@ -156,6 +156,7 @@ class RuntimeCaptureStart(BaseModel):
     language: str = Field(default="en", min_length=2, max_length=16)
     fps: float = Field(default=5.0, ge=1.0, le=12.0)
     regions: list[dict[str, Any]] = Field(default_factory=list, max_length=8)
+    native_overlay: bool = False
 
 
 class RuntimeCaptureRegions(BaseModel):
@@ -889,6 +890,12 @@ def runtime_capture_processes():
     return {"windows": runtime_capture.processes()}
 
 
+@app.get("/api/runtime-capture/capabilities")
+def runtime_capture_capabilities():
+    return {"native_overlay": True, "roi_enabled_locked": True,
+            "review_popup": True}
+
+
 @app.post("/api/runtime-capture/start", status_code=201)
 def start_runtime_capture(body: RuntimeCaptureStart, request: Request):
     if os.name != "nt":
@@ -903,16 +910,22 @@ def start_runtime_capture(body: RuntimeCaptureStart, request: Request):
         manager.busy = True
     try:
         result = runtime_capture.start(current_project_id(), body.hwnd, body.regions,
-                                       body.language, body.fps)
-        command = [sys.executable, "-m", "Dupsync.capture.runtime_overlay",
-                   "--session-id", result["session_id"],
-                   "--project-id", current_project_id(),
-                   "--api-base", str(request.base_url).rstrip("/")]
-        creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
-        overlay = subprocess.Popen(command, cwd=str(APP_DIR.parent.parent),
-                                   close_fds=True, creationflags=creationflags)
-        result["overlay_pid"] = overlay.pid
-        result["message"] = "A captura começou. A faixa de ferramentas ficará sobre o jogo; a tela do jogo não será espelhada no DubSync."
+                                       body.language, body.fps,
+                                       overlay_mode="native" if body.native_overlay else "python")
+        if body.native_overlay:
+            result["overlay_mode"] = "native"
+            result["message"] = "A captura começou. O desktop nativo controla a faixa sobre o jogo; a tela não é espelhada no DubSync."
+        else:
+            command = [sys.executable, "-m", "Dupsync.capture.runtime_overlay",
+                       "--session-id", result["session_id"],
+                       "--project-id", current_project_id(),
+                       "--api-base", str(request.base_url).rstrip("/")]
+            creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+            overlay = subprocess.Popen(command, cwd=str(APP_DIR.parent.parent),
+                                       close_fds=True, creationflags=creationflags)
+            result["overlay_pid"] = overlay.pid
+            result["overlay_mode"] = "python"
+            result["message"] = "A captura começou. A faixa de ferramentas ficará sobre o jogo; a tela do jogo não será espelhada no DubSync."
         return result
     except (ValueError, KeyError, OSError, RuntimeError) as exc:
         job = runtime_capture.get(locals().get("result", {}).get("session_id", ""))

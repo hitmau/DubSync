@@ -21,6 +21,8 @@ class Region:
     roi_id: str = ""
     source_start: float = 0.0
     character_detection: dict[str, Any] | None = None
+    enabled: bool = True
+    locked: bool = False
 
     @classmethod
     def from_dict(cls, value: dict, index: int = 0, source_start: float = 0.0) -> "Region":
@@ -30,12 +32,15 @@ class Region:
                    value.get("lifetime"), value.get("motion"),
                    bool(value.get("speaker_enabled", False)), value.get("speaker_region"),
                    str(value.get("roi_id", "")),
-                   float(source_start), value.get("character_detection"))
+                   float(source_start), value.get("character_detection"),
+                   bool(value.get("enabled", True)), bool(value.get("locked", False)))
 
     def _time(self, entry: dict) -> float:
         return float(entry.get("time", 0) if "time" in entry else entry.get("start", 0)) + (self.source_start if entry.get("mode") == "relative" else 0)
 
     def active_at(self, source_time: float) -> bool:
+        if not self.enabled:
+            return False
         config = self.lifetime or {}
         if not config.get("enabled"):
             return True

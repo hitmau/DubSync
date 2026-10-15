@@ -63,6 +63,7 @@ public partial class CaptureView : UserControl, INotifyPropertyChanged
     private string? _loadedVideoPath;
     private string? _playbackEventsSessionId;
     private string? _runtimeSessionId;
+    private RuntimeOverlayWindow? _runtimeOverlay;
     private CaptureSession? _selectedSession;
     private string _projectLabel;
 
@@ -595,22 +596,33 @@ public partial class CaptureView : UserControl, INotifyPropertyChanged
         {
             StartRuntimeButton.IsEnabled = false;
             RuntimeStateText.Text = "Preparando a janela e o overlay…";
+            var capabilities = await _api.GetRuntimeCaptureCapabilitiesAsync();
+            if (!capabilities.TryGetProperty("native_overlay", out var nativeOverlay) || nativeOverlay.ValueKind != JsonValueKind.True)
+                throw new InvalidOperationException("O serviço conectado ainda não oferece o overlay nativo. Atualize o serviço DubSync quando for seguro e tente novamente.");
             var response = await _api.PostAsync("api/runtime-capture/start", new
             {
                 hwnd = window.Handle,
                 language,
                 fps,
+                native_overlay = true,
                 regions = new[] { new { x = x / 100, y = y / 100, width = width / 100, height = height / 100, name = "dialogue", roi_id = "dialogue" } }
             });
             _runtimeSessionId = response.TryGetProperty("session_id", out var idValue) ? idValue.GetString() : null;
             if (string.IsNullOrWhiteSpace(_runtimeSessionId))
                 throw new InvalidOperationException("A API não retornou o identificador da sessão.");
+            _runtimeOverlay = RuntimeOverlayWindow.ShowForSession(_api, _runtimeSessionId, window.Handle);
             RuntimeErrorText.Visibility = Visibility.Collapsed;
             _runtimePollTimer.Start();
             await RefreshRuntimeStatusAsync();
         }
         catch (Exception exception)
         {
+            if (!string.IsNullOrWhiteSpace(_runtimeSessionId))
+            {
+                try { await _api.PostEmptyAsync($"api/runtime-capture/{Uri.EscapeDataString(_runtimeSessionId)}/stop"); }
+                catch { }
+                _runtimeSessionId = null;
+            }
             StartRuntimeButton.IsEnabled = true;
             SetRuntimeError(exception.Message);
         }
@@ -1103,8 +1115,12 @@ public partial class CaptureView : UserControl, INotifyPropertyChanged
             if (previous is null) return;
             try
             {
-                await _api.GetRuntimeStatusAsync(previous.SessionId);
+                var status = await _api.GetRuntimeStatusAsync(previous.SessionId);
                 _runtimeSessionId = previous.SessionId;
+                if (status.TryGetProperty("config_json", out var config) &&
+                    string.Equals(ReadString(config, "runtime_overlay"), "native", StringComparison.OrdinalIgnoreCase) &&
+                    config.TryGetProperty("hwnd", out var hwndValue) && hwndValue.TryGetInt64(out var hwnd))
+                    _runtimeOverlay = RuntimeOverlayWindow.ShowForSession(_api, previous.SessionId, hwnd);
             }
             catch
             {

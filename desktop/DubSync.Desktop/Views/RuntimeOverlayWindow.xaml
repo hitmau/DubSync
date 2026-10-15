@@ -1,0 +1,12 @@
+<Window x:Class="DubSync.Desktop.Views.RuntimeOverlayWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="DubSync · ROI do jogo"
+        WindowStyle="None" ResizeMode="NoResize" AllowsTransparency="True"
+        Background="Transparent" Topmost="True" ShowInTaskbar="False"
+        ShowActivated="False" Focusable="False" PreviewKeyDown="Window_PreviewKeyDown">
+    <Canvas x:Name="OverlayCanvas" Background="Transparent"
+            PreviewMouseLeftButtonDown="OverlayCanvas_MouseDown"
+            PreviewMouseMove="OverlayCanvas_MouseMove"
+            PreviewMouseLeftButtonUp="OverlayCanvas_MouseUp" />
+</Window>

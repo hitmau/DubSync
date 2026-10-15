@@ -121,6 +121,8 @@ def validate_regions(items: list[dict] | None) -> list[dict]:
         }
         result.append({**spec, "name": str(item.get("name", f"area-{index + 1}"))[:48],
                        "roi_id": str(item.get("roi_id") or uuid.uuid4())[:96],
+                       "enabled": bool(item.get("enabled", True)),
+                       "locked": bool(item.get("locked", False)),
                        "lifetime": {"enabled": bool(lifetime.get("enabled")), "windows": windows},
                        "motion": {"enabled": bool(motion.get("enabled")), "keyframes": keyframes},
                        "speaker_enabled": speaker_enabled, "speaker_region": speaker_region,

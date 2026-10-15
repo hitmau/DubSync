@@ -245,7 +245,7 @@ class RuntimeCaptureManager:
         return result[:100]
 
     def start(self, project_id: str, hwnd: int, regions: list[dict], language: str,
-              fps: float = 5.0) -> dict:
+              fps: float = 5.0, overlay_mode: str = "python") -> dict:
         with self._lock:
             if any(job.worker and job.worker.is_alive() for job in self.jobs.values()):
                 raise ValueError("Já existe uma Captura Real ativa. Encerre-a antes de iniciar outra.")
@@ -261,6 +261,10 @@ class RuntimeCaptureManager:
         cleaned_regions = validate_regions(regions)
         if not cleaned_regions:
             raise ValueError("Adicione ao menos uma ROI ativa antes de iniciar.")
+        if not any(item.get("enabled", True) for item in cleaned_regions):
+            raise ValueError("Mantenha ao menos uma ROI de diálogo ativa.")
+        if overlay_mode not in {"python", "native"}:
+            raise ValueError("Modo de overlay inválido.")
         session_id = str(uuid.uuid4())
         with self.store.Session() as db:
             from ..database.models import DubbingProject
@@ -274,6 +278,7 @@ class RuntimeCaptureManager:
                   "regions": cleaned_regions, "duration": 0, "start": 0,
                   "asset_root": f"projects/{slug}/capture/sessions/{session_id}",
                   "video_only": True,
+                  "runtime_overlay": overlay_mode,
                   "processing_settings": self.settings_provider(),
                   "runtime_capture": {"fps": max(1.0, min(12.0, float(fps)))}}
         self.store.create_session(session_id, "game", f"game://{pid}/{hwnd}", 0, 0,
@@ -327,6 +332,8 @@ class RuntimeCaptureManager:
         cleaned = validate_regions(regions)
         if not cleaned:
             raise ValueError("Mantenha ao menos uma ROI ativa.")
+        if not any(item.get("enabled", True) for item in cleaned):
+            raise ValueError("Mantenha ao menos uma ROI de diálogo ativa.")
         job.source.set_regions(cleaned)
         session = self.store.session(session_id) or {}
         config = dict(session.get("config_json") or {})

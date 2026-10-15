@@ -251,6 +251,9 @@ class RuntimeOverlay:
             else:
                 self.status_var.set("Mantenha ao menos uma ROI de diálogo.")
             return
+        if self.regions[self.selected_roi].get("locked"):
+            self.status_var.set("Esta ROI está bloqueada. Desbloqueie-a antes de mover ou redimensionar.")
+            return
         x0, y0, x1, y1 = box["rect"]
         if abs(event.x - x0) <= 13 and abs(event.y - y0) <= 13:
             action = "move"
@@ -360,6 +363,8 @@ class RuntimeOverlay:
         width, height = max(1, self.canvas.winfo_width()), max(1, self.canvas.winfo_height())
         self.boxes = []
         for index, region in enumerate(self.regions):
+            if not region.get("enabled", True):
+                continue
             x0 = int(float(region.get("x", 0)) * width)
             y0 = int(float(region.get("y", 0)) * height)
             x1 = int((float(region.get("x", 0)) + float(region.get("width", 0))) * width)

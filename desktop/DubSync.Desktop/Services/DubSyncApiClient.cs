@@ -129,6 +129,13 @@ public sealed class DubSyncApiClient : IDisposable
         return result.Windows;
     }
 
+    public async Task<System.Text.Json.JsonElement> GetRuntimeCaptureCapabilitiesAsync(CancellationToken cancellationToken = default)
+    {
+        using var response = await _http.GetAsync("api/runtime-capture/capabilities", cancellationToken);
+        await EnsureSuccessAsync(response, cancellationToken);
+        return await response.Content.ReadFromJsonAsync<System.Text.Json.JsonElement>(cancellationToken: cancellationToken);
+    }
+
     public async Task<RuntimePendingEventList> GetRuntimePendingAsync(string sessionId, CancellationToken cancellationToken = default)
     {
         return await _http.GetFromJsonAsync<RuntimePendingEventList>(
