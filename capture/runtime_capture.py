@@ -59,6 +59,8 @@ class LiveScreenFrameSource:
         self._pause_started: float | None = None
         self._paused_seconds = 0.0
         self._recent: deque[FramePacket] = deque(maxlen=48)
+        self._analysis_times: deque[float] = deque(maxlen=40)
+        self._metrics_lock = threading.Lock()
         self._graphics_capture: WindowsGraphicsCaptureStream | None = None
         self._opened = False
 
@@ -135,6 +137,21 @@ class LiveScreenFrameSource:
             shot = screen.grab({key: int(window[key]) for key in ("left", "top", "width", "height")})
         return np.asarray(shot, dtype=np.uint8)[:, :, :3].copy()
 
+    def _record_analysis_frame(self) -> None:
+        with self._metrics_lock:
+            now = time.monotonic()
+            while self._analysis_times and now - self._analysis_times[0] > 2.0:
+                self._analysis_times.popleft()
+            self._analysis_times.append(now)
+
+    @property
+    def observed_analysis_fps(self) -> float:
+        with self._metrics_lock:
+            if len(self._analysis_times) < 2 or time.monotonic() - self._analysis_times[-1] > 2.0:
+                return 0.0
+            elapsed = self._analysis_times[-1] - self._analysis_times[0]
+            return (len(self._analysis_times) - 1) / elapsed if elapsed > 0 else 0.0
+
     def iter_frames(self):
         if self.capture_backend == "windows_graphics_capture":
             yield from self._iter_windows_graphics_capture()
@@ -167,6 +184,7 @@ class LiveScreenFrameSource:
                 self.frames_read += 1
                 self.last_source_time = source_time
                 self._recent.append(packet)
+                self._record_analysis_frame()
                 yield packet
                 deadline = max(deadline + 1 / self.sample_fps, time.monotonic())
                 self._stop.wait(max(0.0, deadline - time.monotonic()))
@@ -198,6 +216,7 @@ class LiveScreenFrameSource:
             self.frames_read += 1
             self.last_source_time = source_time
             self._recent.append(packet)
+            self._record_analysis_frame()
             yield packet
             deadline = max(deadline + 1 / self.sample_fps, time.monotonic())
             self._stop.wait(max(0.0, deadline - time.monotonic()))
@@ -270,6 +289,8 @@ class RuntimeCaptureJob:
         self.on_complete = on_complete
         self._lock = threading.RLock()
         self._next_duration_update = 0.0
+        self._process = psutil.Process(os.getpid())
+        self._process.cpu_percent(interval=None)
 
     def launch(self) -> None:
         self.worker = threading.Thread(target=self._run, name=f"DubSyncGame-{self.session_id[:8]}", daemon=True)
@@ -317,6 +338,14 @@ class RuntimeCaptureJob:
 
     def state(self) -> dict:
         with self._lock:
+            try:
+                cpu_percent = self._process.cpu_percent(interval=None)
+                memory_mb = self._process.memory_info().rss / (1024 * 1024)
+            except psutil.Error:
+                cpu_percent = None
+                memory_mb = None
+            capture_fps_actual = (self.source._graphics_capture.observed_fps
+                                  if self.source._graphics_capture else self.source.observed_analysis_fps)
             return {"session_id": self.session_id,
                     "state": "stopping" if self.source._stop.is_set() and self.worker and self.worker.is_alive()
                     else ("paused" if self.source.paused and self.worker and self.worker.is_alive()
@@ -327,6 +356,10 @@ class RuntimeCaptureJob:
                     "fps": self.source.sample_fps,
                     "analysis_fps": self.source.sample_fps,
                     "capture_fps": self.source.capture_fps,
+                    "analysis_fps_actual": self.source.observed_analysis_fps,
+                    "capture_fps_actual": capture_fps_actual,
+                    "cpu_percent": cpu_percent,
+                    "memory_mb": memory_mb,
                     "capture_backend": self.source.capture_backend}
 
 

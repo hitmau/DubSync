@@ -3,6 +3,7 @@ from __future__ import annotations
 import importlib
 import threading
 import time
+from collections import deque
 from typing import Any
 
 import numpy as np
@@ -40,6 +41,7 @@ class WindowsGraphicsCaptureStream:
         self._latest: np.ndarray | None = None
         self._generation = 0
         self._last_copy_at = 0.0
+        self._copy_times: deque[float] = deque(maxlen=120)
         self._paused = False
         self._stopping = False
         self._closed = False
@@ -90,6 +92,10 @@ class WindowsGraphicsCaptureStream:
                     return
                 self._latest = image
                 self._generation += 1
+                copied_at = time.monotonic()
+                while self._copy_times and copied_at - self._copy_times[0] > 2.0:
+                    self._copy_times.popleft()
+                self._copy_times.append(copied_at)
                 self._condition.notify_all()
 
         @capture.event
@@ -144,6 +150,14 @@ class WindowsGraphicsCaptureStream:
             if image is None:
                 return None
             return image.copy() if copy else image
+
+    @property
+    def observed_fps(self) -> float:
+        with self._condition:
+            if len(self._copy_times) < 2 or time.monotonic() - self._copy_times[-1] > 2.0:
+                return 0.0
+            elapsed = self._copy_times[-1] - self._copy_times[0]
+            return (len(self._copy_times) - 1) / elapsed if elapsed > 0 else 0.0
 
     def wait_for_frame(self, timeout: float) -> bool:
         with self._condition:

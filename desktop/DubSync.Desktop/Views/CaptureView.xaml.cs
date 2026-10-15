@@ -958,6 +958,10 @@ public partial class CaptureView : UserControl, INotifyPropertyChanged
             if (analysisFps <= 0) analysisFps = ReadDouble(status, "fps");
             var captureFps = ReadDouble(status, "capture_fps");
             if (captureFps <= 0) captureFps = analysisFps;
+            var analysisActual = ReadDouble(status, "analysis_fps_actual");
+            var captureActual = ReadDouble(status, "capture_fps_actual");
+            var cpuPercent = ReadDouble(status, "cpu_percent");
+            var memoryMb = ReadDouble(status, "memory_mb");
             var title = status.TryGetProperty("window", out var window) ? ReadString(window, "title") : "";
             RuntimeStateText.Text = $"{RuntimeStateLabel(state)}{(string.IsNullOrWhiteSpace(title) ? "" : " · " + title)}";
             if (!string.IsNullOrWhiteSpace(stage)) RuntimeStatsText.Text = $"{stage}   ·   {frames:N0} frames   ·   {ocr:N0} OCR   ·   {events:N0} falas";
@@ -965,6 +969,7 @@ public partial class CaptureView : UserControl, INotifyPropertyChanged
             RuntimeFpsText.Text = captureFps > 0 && analysisFps > 0
                 ? $"Alvo: Captura {captureFps:0.#} · Análise {analysisFps:0.#} FPS"
                 : "Alvo: Captura — · Análise — FPS";
+            RuntimePerfText.Text = $"Real: captura {FormatMetric(captureActual, "FPS")} · análise {FormatMetric(analysisActual, "FPS")} · serviço {FormatMetric(cpuPercent, "% CPU")} · {FormatMetric(memoryMb, "MB RAM")}";
             var active = state is "preparing" or "running" or "paused" or "stopping";
             RuntimeProgress.IsIndeterminate = state is "preparing" or "running" or "stopping";
             RuntimeProgress.Value = active ? 0 : 100;
@@ -1012,6 +1017,8 @@ public partial class CaptureView : UserControl, INotifyPropertyChanged
     private static double ReadDouble(JsonElement element, string property) =>
         element.ValueKind == JsonValueKind.Object && element.TryGetProperty(property, out var value) && value.TryGetDouble(out var number)
             ? number : 0;
+
+    private static string FormatMetric(double value, string unit) => value > 0 ? $"{value:0.#} {unit}" : "—";
 
     private void SetRuntimeError(string message)
     {

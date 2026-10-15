@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sys
+import time
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -81,6 +82,18 @@ class WindowsGraphicsCaptureTests(unittest.TestCase):
         self.assertTrue(np.all(snapshot == 27))
         stream.stop()
         self.assertTrue(capture.control.stopped)
+
+    def test_native_stream_reports_observed_copy_rate(self):
+        pixels = np.full((7, 11, 3), 27, dtype=np.uint8)
+        capture = _FakeCapture(pixels=pixels)
+        stream = WindowsGraphicsCaptureStream(1234, 60, capture_type=lambda **kwargs: capture)
+
+        stream.start(timeout=0.2)
+        time.sleep(0.05)
+        capture.handlers["on_frame_arrived"](_FakeFrame(pixels), capture.control)
+
+        self.assertGreater(stream.observed_fps, 0)
+        stream.stop()
 
     def test_capture_backend_is_explicit_and_keeps_legacy_default(self):
         legacy = LiveScreenFrameSource(10, [], fps=5)
