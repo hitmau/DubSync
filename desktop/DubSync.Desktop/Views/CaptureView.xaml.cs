@@ -599,12 +599,15 @@ public partial class CaptureView : UserControl, INotifyPropertyChanged
             var capabilities = await _api.GetRuntimeCaptureCapabilitiesAsync();
             if (!capabilities.TryGetProperty("native_overlay", out var nativeOverlay) || nativeOverlay.ValueKind != JsonValueKind.True)
                 throw new InvalidOperationException("O serviço conectado ainda não oferece o overlay nativo. Atualize o serviço DubSync quando for seguro e tente novamente.");
+            if (!capabilities.TryGetProperty("windows_graphics_capture", out var graphicsCapture) || graphicsCapture.ValueKind != JsonValueKind.True)
+                throw new InvalidOperationException("O serviço conectado ainda não tem Windows Graphics Capture instalado. Execute setup.ps1 e reinicie o serviço quando for seguro; nenhuma sessão foi iniciada.");
             var response = await _api.PostAsync("api/runtime-capture/start", new
             {
                 hwnd = window.Handle,
                 language,
                 fps,
                 native_overlay = true,
+                capture_backend = "windows_graphics_capture",
                 regions = new[] { new { x = x / 100, y = y / 100, width = width / 100, height = height / 100, name = "dialogue", roi_id = "dialogue" } }
             });
             _runtimeSessionId = response.TryGetProperty("session_id", out var idValue) ? idValue.GetString() : null;

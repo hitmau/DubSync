@@ -31,6 +31,7 @@ from ..capture.video_plan import build_video_plan
 from ..capture.file_source import FileVideoSource
 from ..capture.youtube_source import YoutubeFrameSource
 from ..capture.runtime_capture import RuntimeCaptureManager
+from ..capture.windows_graphics_capture import windows_graphics_capture_available
 from ..capture.runtime_windows import client_window
 from ..database.store import DubSyncStore
 from ..database.models import DubbingProject
@@ -157,6 +158,7 @@ class RuntimeCaptureStart(BaseModel):
     fps: float = Field(default=5.0, ge=1.0, le=12.0)
     regions: list[dict[str, Any]] = Field(default_factory=list, max_length=8)
     native_overlay: bool = False
+    capture_backend: Literal["legacy", "windows_graphics_capture"] = "legacy"
 
 
 class RuntimeCaptureRegions(BaseModel):
@@ -893,7 +895,8 @@ def runtime_capture_processes():
 @app.get("/api/runtime-capture/capabilities")
 def runtime_capture_capabilities():
     return {"native_overlay": True, "roi_enabled_locked": True,
-            "review_popup": True}
+            "review_popup": True,
+            "windows_graphics_capture": os.name == "nt" and windows_graphics_capture_available()}
 
 
 @app.post("/api/runtime-capture/start", status_code=201)
@@ -911,7 +914,8 @@ def start_runtime_capture(body: RuntimeCaptureStart, request: Request):
     try:
         result = runtime_capture.start(current_project_id(), body.hwnd, body.regions,
                                        body.language, body.fps,
-                                       overlay_mode="native" if body.native_overlay else "python")
+                                       overlay_mode="native" if body.native_overlay else "python",
+                                       capture_backend=body.capture_backend)
         if body.native_overlay:
             result["overlay_mode"] = "native"
             result["message"] = "A captura começou. O desktop nativo controla a faixa sobre o jogo; a tela não é espelhada no DubSync."

@@ -6,6 +6,7 @@ import threading
 import time
 import uuid
 from collections import deque
+from ctypes import wintypes
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable
@@ -24,16 +25,24 @@ from ..ocr.engine import OcrEngine
 from ..projects.context import reset_project_context, set_project_context
 from ..projects.storage import ProjectStorage
 from .runtime_windows import capture_window_client, client_window, visible_game_windows
+from .windows_graphics_capture import (
+    WindowsGraphicsCaptureStream,
+    windows_graphics_capture_available,
+)
 
 
 class LiveScreenFrameSource:
     """Window-scoped live frame source. Pausing freezes the source clock."""
 
-    def __init__(self, hwnd: int, regions: list[dict], fps: float = 5.0):
+    def __init__(self, hwnd: int, regions: list[dict], fps: float = 5.0,
+                 capture_backend: str = "legacy"):
         self.hwnd = int(hwnd)
         self.source_id = f"game-window-{self.hwnd}"
         self.is_live = True
         self.sample_fps = max(1.0, min(12.0, float(fps)))
+        if capture_backend not in {"legacy", "windows_graphics_capture"}:
+            raise ValueError("Backend de captura inválido.")
+        self.capture_backend = capture_backend
         self.frames_read = 0
         self.frames_in_range = 0
         self.last_source_time = 0.0
@@ -47,13 +56,21 @@ class LiveScreenFrameSource:
         self._pause_started: float | None = None
         self._paused_seconds = 0.0
         self._recent: deque[FramePacket] = deque(maxlen=48)
+        self._graphics_capture: WindowsGraphicsCaptureStream | None = None
+        self._opened = False
 
     def open(self) -> None:
+        if self._opened:
+            return
         if os.name != "nt":
             raise RuntimeError("A Captura Real por janela do jogo está disponível no Windows.")
         if not client_window(self.hwnd):
             raise RuntimeError("A janela do jogo não está disponível. Traga o jogo para frente e tente novamente.")
         self._clock_started = time.monotonic()
+        if self.capture_backend == "windows_graphics_capture":
+            self._graphics_capture = WindowsGraphicsCaptureStream(self.hwnd, self.sample_fps)
+            self._graphics_capture.start()
+        self._opened = True
 
     def set_regions(self, regions: list[dict]) -> None:
         with self._regions_lock:
@@ -68,6 +85,8 @@ class LiveScreenFrameSource:
             self._pause_started = time.monotonic()
             self.paused = True
             self._resume.clear()
+            if self._graphics_capture:
+                self._graphics_capture.set_paused(True)
 
     def resume(self) -> None:
         if self.paused:
@@ -76,10 +95,14 @@ class LiveScreenFrameSource:
             self._pause_started = None
             self.paused = False
             self._resume.set()
+            if self._graphics_capture:
+                self._graphics_capture.set_paused(False)
 
     def stop(self) -> None:
         self._stop.set()
         self._resume.set()
+        if self._graphics_capture:
+            self._graphics_capture.stop()
 
     def _source_time(self) -> float:
         now = time.monotonic()
@@ -89,6 +112,13 @@ class LiveScreenFrameSource:
         return max(0.0, now - self._clock_started - paused)
 
     def capture_current_frame(self, screen=None) -> np.ndarray:
+        if self.capture_backend == "windows_graphics_capture":
+            if not self._graphics_capture:
+                raise RuntimeError("A captura nativa ainda não foi iniciada.")
+            image = self._graphics_capture.latest_frame()
+            if image is None:
+                raise RuntimeError("O Windows ainda não forneceu um frame da janela do jogo.")
+            return self._client_area_frame(image)
         image = capture_window_client(self.hwnd)
         if image is not None:
             return image
@@ -103,6 +133,9 @@ class LiveScreenFrameSource:
         return np.asarray(shot, dtype=np.uint8)[:, :, :3].copy()
 
     def iter_frames(self):
+        if self.capture_backend == "windows_graphics_capture":
+            yield from self._iter_windows_graphics_capture()
+            return
         with mss.mss() as screen:
             deadline = time.monotonic()
             while not self._stop.is_set():
@@ -135,6 +168,71 @@ class LiveScreenFrameSource:
                 deadline = max(deadline + 1 / self.sample_fps, time.monotonic())
                 self._stop.wait(max(0.0, deadline - time.monotonic()))
 
+    def _iter_windows_graphics_capture(self):
+        if not self._graphics_capture:
+            raise RuntimeError("A captura nativa ainda não foi iniciada.")
+        deadline = time.monotonic()
+        while not self._stop.is_set():
+            if not self._resume.wait(timeout=0.25):
+                continue
+            if self._stop.is_set():
+                break
+            window = client_window(self.hwnd)
+            if not window:
+                raise RuntimeError("A janela do jogo foi fechada ou deixou de ser capturável.")
+            image = self._graphics_capture.latest_frame(copy=False)
+            if image is None:
+                self._graphics_capture.wait_for_frame(timeout=0.25)
+                continue
+            image = self._client_area_frame(image, window)
+            source_time = self._source_time()
+            packet = FramePacket(
+                image=image, source_id=self.source_id, segment_id="live",
+                frame_id=self.frames_read + 1, source_time=source_time,
+                captured_at=datetime.now(timezone.utc), monotonic_ns=time.monotonic_ns(),
+                timing_quality="live_capture", timing_error_ms=0.0,
+            )
+            self.frames_read += 1
+            self.last_source_time = source_time
+            self._recent.append(packet)
+            yield packet
+            deadline = max(deadline + 1 / self.sample_fps, time.monotonic())
+            self._stop.wait(max(0.0, deadline - time.monotonic()))
+
+    def _client_area_frame(self, image: np.ndarray, window: dict | None = None) -> np.ndarray:
+        """Crop non-client borders only when the WGC frame matches the outer HWND bounds."""
+        window = window or client_window(self.hwnd)
+        if not window or os.name != "nt":
+            return image
+        rect = wintypes.RECT()
+        try:
+            if not ctypes.windll.user32.GetWindowRect(wintypes.HWND(self.hwnd), ctypes.byref(rect)):
+                return image
+        except (AttributeError, OSError, ctypes.ArgumentError):
+            return image
+        outer_width = int(rect.right - rect.left)
+        outer_height = int(rect.bottom - rect.top)
+        if outer_width <= 0 or outer_height <= 0:
+            return image
+        scale_x = image.shape[1] / outer_width
+        scale_y = image.shape[0] / outer_height
+        # A client-only frame can also differ in scale from the client pixel size.
+        # Only crop when both axes agree that this is the complete outer window.
+        if abs(scale_x - scale_y) > max(scale_x, scale_y) * 0.03:
+            return image
+        client_width = int(window["width"])
+        client_height = int(window["height"])
+        if image.shape[1] <= client_width or image.shape[0] <= client_height:
+            return image
+        x0 = round((int(window["left"]) - int(rect.left)) * scale_x)
+        y0 = round((int(window["top"]) - int(rect.top)) * scale_y)
+        width = round(client_width * scale_x)
+        height = round(client_height * scale_y)
+        x1, y1 = min(image.shape[1], x0 + width), min(image.shape[0], y0 + height)
+        if x0 < 0 or y0 < 0 or x1 <= x0 or y1 <= y0:
+            return image
+        return image[y0:y1, x0:x1]
+
     def frame_near(self, source_time: float) -> FramePacket | None:
         if not self._recent:
             return None
@@ -157,7 +255,8 @@ class RuntimeCaptureJob:
         self.session_dir = session_dir
         self.settings = settings
         self.source = LiveScreenFrameSource(hwnd, regions,
-                                            settings.get("runtime_capture", {}).get("fps", 5))
+                                            settings.get("runtime_capture", {}).get("fps", 5),
+                                            settings.get("runtime_capture", {}).get("capture_backend", "legacy"))
         self.processor: DialogueProcessor | None = None
         self.worker: threading.Thread | None = None
         self.progress: dict = {"stage": "preparing", "current_source_time": 0.0,
@@ -185,6 +284,7 @@ class RuntimeCaptureJob:
         token = set_project_context(self.project_id)
         try:
             self.session_dir.mkdir(parents=True, exist_ok=True)
+            self.source.open()
             self.store.set_session_state(self.session_id, "running")
             regions = [Region.from_dict(item, index, 0.0)
                        for index, item in enumerate(self.source.regions())]
@@ -206,6 +306,7 @@ class RuntimeCaptureJob:
                 self.progress = {**self.progress, "stage": "failed", "activity_message": self.error}
             self.store.set_session_state(self.session_id, "failed", self.error)
         finally:
+            self.source.close()
             reset_project_context(token)
             if self.on_complete:
                 self.on_complete(self.session_id)
@@ -218,7 +319,7 @@ class RuntimeCaptureJob:
                           else ("running" if self.worker and self.worker.is_alive() else self.progress.get("stage", "stopped"))),
                     "progress": dict(self.progress), "error": self.error,
                     "window": client_window(self.hwnd), "regions": self.source.regions(),
-                    "fps": self.source.sample_fps}
+                    "fps": self.source.sample_fps, "capture_backend": self.source.capture_backend}
 
 
 class RuntimeCaptureManager:
@@ -245,7 +346,8 @@ class RuntimeCaptureManager:
         return result[:100]
 
     def start(self, project_id: str, hwnd: int, regions: list[dict], language: str,
-              fps: float = 5.0, overlay_mode: str = "python") -> dict:
+              fps: float = 5.0, overlay_mode: str = "python",
+              capture_backend: str = "legacy") -> dict:
         with self._lock:
             if any(job.worker and job.worker.is_alive() for job in self.jobs.values()):
                 raise ValueError("Já existe uma Captura Real ativa. Encerre-a antes de iniciar outra.")
@@ -265,6 +367,13 @@ class RuntimeCaptureManager:
             raise ValueError("Mantenha ao menos uma ROI de diálogo ativa.")
         if overlay_mode not in {"python", "native"}:
             raise ValueError("Modo de overlay inválido.")
+        if capture_backend not in {"legacy", "windows_graphics_capture"}:
+            raise ValueError("Backend de captura inválido.")
+        if capture_backend == "windows_graphics_capture" and not windows_graphics_capture_available():
+            raise RuntimeError(
+                "Windows Graphics Capture não está disponível neste serviço. "
+                "Execute setup.ps1 e reinicie o serviço quando for seguro."
+            )
         session_id = str(uuid.uuid4())
         with self.store.Session() as db:
             from ..database.models import DubbingProject
@@ -279,8 +388,10 @@ class RuntimeCaptureManager:
                   "asset_root": f"projects/{slug}/capture/sessions/{session_id}",
                   "video_only": True,
                   "runtime_overlay": overlay_mode,
+                  "capture_backend": capture_backend,
                   "processing_settings": self.settings_provider(),
-                  "runtime_capture": {"fps": max(1.0, min(12.0, float(fps)))}}
+                  "runtime_capture": {"fps": max(1.0, min(12.0, float(fps))),
+                                      "capture_backend": capture_backend}}
         self.store.create_session(session_id, "game", f"game://{pid}/{hwnd}", 0, 0,
                                   language, config, state="preparing")
         job = RuntimeCaptureJob(self.store, project_id, session_id, int(hwnd), cleaned_regions,
