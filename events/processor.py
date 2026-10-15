@@ -54,6 +54,7 @@ class DialogueProcessor:
             self.changed_pixel_fraction,
         )
         self.last_ocr_at: dict[str, float] = {}
+        self.periodic_ocr_seconds = float(detection.get("periodic_ocr_seconds", 1.25))
         self.recent: deque[FramePacket] = deque(maxlen=16)
         self.last_sample_time: float | None = None
         self.last_packet_time: float | None = None
@@ -171,8 +172,8 @@ class DialogueProcessor:
             x0, y0, x1, y1 = region.bounds(packet.image, packet.source_time)
             roi = packet.image[y0:y1, x0:x1]
             changed = self.visual.changed(region.name, roi)
-            stale = packet.source_time - self.last_ocr_at.get(region.name, float("-inf")) >= \
-                float(self.settings.get("detection", {}).get("periodic_ocr_seconds", 1.25))
+            stale = self.periodic_ocr_seconds > 0 and \
+                packet.source_time - self.last_ocr_at.get(region.name, float("-inf")) >= self.periodic_ocr_seconds
             if not changed and not stale:
                 actions = tracker.observe(packet, None)
                 self._actions(region.name, actions, packet, source)

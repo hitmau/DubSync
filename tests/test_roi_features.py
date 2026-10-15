@@ -211,6 +211,40 @@ class RoiFeaturesTests(unittest.TestCase):
             processor._inspect(frame, None)
         self.assertEqual(ocr.shapes, [(30, 80, 3)])
 
+    def test_zero_periodic_ocr_skips_unchanged_roi_but_positive_period_retries(self) -> None:
+        config = validate_regions([{"name": "dialogue", "x": .1, "y": .5, "width": .8, "height": .4}])[0]
+        frame = FramePacket(np.zeros((100, 200, 3), np.uint8), "test", "live", 50,
+                            5.0, datetime.now(timezone.utc), 5_000_000_000)
+
+        class RecordingOcr:
+            def __init__(self) -> None:
+                self.calls = 0
+
+            def recognize(self, _crop: np.ndarray) -> list:
+                self.calls += 1
+                return []
+
+        live_ocr = RecordingOcr()
+        live_processor = DialogueProcessor(
+            None, "live-test", Path("."), [Region.from_dict(config)], "en", ocr=live_ocr,
+            settings={"detection": {"periodic_ocr_seconds": 0}},
+        )
+        live_processor.visual.changed = lambda _key, _roi: False
+        live_processor.last_ocr_at["dialogue"] = 0.0
+        live_processor._inspect(frame, None)
+
+        video_ocr = RecordingOcr()
+        video_processor = DialogueProcessor(
+            None, "video-test", Path("."), [Region.from_dict(config)], "en", ocr=video_ocr,
+            settings={"detection": {"periodic_ocr_seconds": 1.25}},
+        )
+        video_processor.visual.changed = lambda _key, _roi: False
+        video_processor.last_ocr_at["dialogue"] = 0.0
+        video_processor._inspect(frame, None)
+
+        self.assertEqual(live_ocr.calls, 0)
+        self.assertEqual(video_ocr.calls, 1)
+
     def test_speaker_ocr_is_saved_separately_with_original_crop(self) -> None:
         config = validate_regions([{
             "name": "dialogue", "x": .1, "y": .5, "width": .8, "height": .4,

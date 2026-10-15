@@ -10,7 +10,7 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-from Dupsync.capture.runtime_capture import LiveScreenFrameSource
+from Dupsync.capture.runtime_capture import LiveScreenFrameSource, live_capture_processing_settings
 from Dupsync.capture.windows_graphics_capture import WindowsGraphicsCaptureStream
 
 
@@ -113,6 +113,18 @@ class WindowsGraphicsCaptureTests(unittest.TestCase):
         self.assertEqual(source.capture_fps, 30)
         legacy = LiveScreenFrameSource(10, [], fps=5)
         self.assertEqual(legacy.sample_fps, legacy.capture_fps)
+
+    def test_live_capture_disables_periodic_ocr_without_mutating_global_settings(self):
+        settings = {"detection": {"periodic_ocr_seconds": 1.25, "analysis_fps": 8},
+                    "ocr": {"min_confidence": 0.4}}
+
+        live_settings = live_capture_processing_settings(settings, analysis_fps=10)
+
+        self.assertEqual(live_settings["detection"]["periodic_ocr_seconds"], 0)
+        self.assertEqual(live_settings["detection"]["analysis_fps"], 10)
+        self.assertEqual(live_settings["ocr"]["min_confidence"], 0.4)
+        self.assertEqual(settings["detection"]["periodic_ocr_seconds"], 1.25)
+        self.assertEqual(settings["detection"]["analysis_fps"], 8)
 
     @patch("Dupsync.capture.runtime_capture.os.name", "nt")
     @patch("Dupsync.capture.runtime_capture.client_window", return_value={

@@ -5,6 +5,7 @@ import os
 import threading
 import time
 import uuid
+from copy import deepcopy
 from collections import deque
 from ctypes import wintypes
 from datetime import datetime, timezone
@@ -29,6 +30,16 @@ from .windows_graphics_capture import (
     WindowsGraphicsCaptureStream,
     windows_graphics_capture_available,
 )
+
+
+def live_capture_processing_settings(settings: dict, analysis_fps: float | None = None) -> dict:
+    """Disable periodic OCR for the live sensor; OCR runs only after ROI changes."""
+    result = deepcopy(settings or {})
+    detection = result.setdefault("detection", {})
+    detection["periodic_ocr_seconds"] = 0
+    if analysis_fps is not None:
+        detection["analysis_fps"] = max(1, min(20, int(analysis_fps)))
+    return result
 
 
 class LiveScreenFrameSource:
@@ -425,6 +436,7 @@ class RuntimeCaptureManager:
         session_dir = self.project_storage.capture_session_dir(slug, session_id)
         analysis_fps = max(1.0, min(20.0, float(fps)))
         capture_rate = max(1.0, min(60.0, float(capture_fps if capture_fps is not None else fps)))
+        processing_settings = live_capture_processing_settings(self.settings_provider(), analysis_fps)
         config = {"mode": "game_live", "hwnd": int(hwnd), "pid": pid,
                   "process_name": process_name, "window_title": str(window.get("title", "")),
                   "regions": cleaned_regions, "duration": 0, "start": 0,
@@ -432,7 +444,7 @@ class RuntimeCaptureManager:
                   "video_only": True,
                   "runtime_overlay": overlay_mode,
                   "capture_backend": capture_backend,
-                  "processing_settings": self.settings_provider(),
+                  "processing_settings": processing_settings,
                   "runtime_capture": {"fps": analysis_fps,
                                       "analysis_fps": analysis_fps,
                                       "capture_fps": capture_rate,
