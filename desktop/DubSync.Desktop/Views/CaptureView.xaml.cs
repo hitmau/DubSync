@@ -970,7 +970,7 @@ public partial class CaptureView : UserControl, INotifyPropertyChanged
             RuntimeFpsText.Text = captureFps > 0 && analysisFps > 0
                 ? $"Alvo: Captura {captureFps:0.#} · Análise {analysisFps:0.#} FPS"
                 : "Alvo: Captura — · Análise — FPS";
-            RuntimePerfText.Text = $"Real: captura {FormatMetric(captureActual, "FPS")} · análise {FormatMetric(analysisActual, "FPS")} · serviço {FormatMetric(cpuPercent, "% CPU")} · {FormatMetric(gpuPercent, "% GPU")} · {FormatMetric(memoryMb, "MB RAM")}";
+            RuntimePerfText.Text = $"Real: captura {FormatMetric(captureActual, "FPS")} · análise {FormatMetric(analysisActual, "FPS")} · serviço {FormatMetric(cpuPercent, "% CPU")} · DubSync {FormatMetric(gpuPercent, "% GPU")} · {FormatMetric(memoryMb, "MB RAM")}";
             var active = state is "preparing" or "running" or "paused" or "stopping";
             RuntimeProgress.IsIndeterminate = state is "preparing" or "running" or "stopping";
             RuntimeProgress.Value = active ? 0 : 100;
