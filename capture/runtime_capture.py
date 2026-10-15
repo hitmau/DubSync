@@ -35,14 +35,17 @@ class LiveScreenFrameSource:
     """Window-scoped live frame source. Pausing freezes the source clock."""
 
     def __init__(self, hwnd: int, regions: list[dict], fps: float = 5.0,
-                 capture_backend: str = "legacy"):
+                 capture_backend: str = "legacy", capture_fps: float | None = None):
         self.hwnd = int(hwnd)
         self.source_id = f"game-window-{self.hwnd}"
         self.is_live = True
-        self.sample_fps = max(1.0, min(12.0, float(fps)))
+        self.sample_fps = max(1.0, min(20.0, float(fps)))
+        # Keep the original single-rate behavior unless a client explicitly opts in.
+        requested_capture_fps = max(1.0, min(60.0, float(capture_fps if capture_fps is not None else fps)))
         if capture_backend not in {"legacy", "windows_graphics_capture"}:
             raise ValueError("Backend de captura inválido.")
         self.capture_backend = capture_backend
+        self.capture_fps = requested_capture_fps if capture_backend == "windows_graphics_capture" else self.sample_fps
         self.frames_read = 0
         self.frames_in_range = 0
         self.last_source_time = 0.0
@@ -68,7 +71,7 @@ class LiveScreenFrameSource:
             raise RuntimeError("A janela do jogo não está disponível. Traga o jogo para frente e tente novamente.")
         self._clock_started = time.monotonic()
         if self.capture_backend == "windows_graphics_capture":
-            self._graphics_capture = WindowsGraphicsCaptureStream(self.hwnd, self.sample_fps)
+            self._graphics_capture = WindowsGraphicsCaptureStream(self.hwnd, self.capture_fps)
             self._graphics_capture.start()
         self._opened = True
 
@@ -256,7 +259,8 @@ class RuntimeCaptureJob:
         self.settings = settings
         self.source = LiveScreenFrameSource(hwnd, regions,
                                             settings.get("runtime_capture", {}).get("fps", 5),
-                                            settings.get("runtime_capture", {}).get("capture_backend", "legacy"))
+                                            settings.get("runtime_capture", {}).get("capture_backend", "legacy"),
+                                            settings.get("runtime_capture", {}).get("capture_fps"))
         self.processor: DialogueProcessor | None = None
         self.worker: threading.Thread | None = None
         self.progress: dict = {"stage": "preparing", "current_source_time": 0.0,
@@ -319,7 +323,11 @@ class RuntimeCaptureJob:
                           else ("running" if self.worker and self.worker.is_alive() else self.progress.get("stage", "stopped"))),
                     "progress": dict(self.progress), "error": self.error,
                     "window": client_window(self.hwnd), "regions": self.source.regions(),
-                    "fps": self.source.sample_fps, "capture_backend": self.source.capture_backend}
+                    # `fps` is kept for older clients; new clients receive both rates.
+                    "fps": self.source.sample_fps,
+                    "analysis_fps": self.source.sample_fps,
+                    "capture_fps": self.source.capture_fps,
+                    "capture_backend": self.source.capture_backend}
 
 
 class RuntimeCaptureManager:
@@ -347,7 +355,7 @@ class RuntimeCaptureManager:
 
     def start(self, project_id: str, hwnd: int, regions: list[dict], language: str,
               fps: float = 5.0, overlay_mode: str = "python",
-              capture_backend: str = "legacy") -> dict:
+              capture_backend: str = "legacy", capture_fps: float | None = None) -> dict:
         with self._lock:
             if any(job.worker and job.worker.is_alive() for job in self.jobs.values()):
                 raise ValueError("Já existe uma Captura Real ativa. Encerre-a antes de iniciar outra.")
@@ -382,6 +390,8 @@ class RuntimeCaptureManager:
                 raise KeyError(project_id)
             slug = project.slug
         session_dir = self.project_storage.capture_session_dir(slug, session_id)
+        analysis_fps = max(1.0, min(20.0, float(fps)))
+        capture_rate = max(1.0, min(60.0, float(capture_fps if capture_fps is not None else fps)))
         config = {"mode": "game_live", "hwnd": int(hwnd), "pid": pid,
                   "process_name": process_name, "window_title": str(window.get("title", "")),
                   "regions": cleaned_regions, "duration": 0, "start": 0,
@@ -390,7 +400,9 @@ class RuntimeCaptureManager:
                   "runtime_overlay": overlay_mode,
                   "capture_backend": capture_backend,
                   "processing_settings": self.settings_provider(),
-                  "runtime_capture": {"fps": max(1.0, min(12.0, float(fps))),
+                  "runtime_capture": {"fps": analysis_fps,
+                                      "analysis_fps": analysis_fps,
+                                      "capture_fps": capture_rate,
                                       "capture_backend": capture_backend}}
         self.store.create_session(session_id, "game", f"game://{pid}/{hwnd}", 0, 0,
                                   language, config, state="preparing")

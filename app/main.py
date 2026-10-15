@@ -155,7 +155,10 @@ class FileStart(BaseModel):
 class RuntimeCaptureStart(BaseModel):
     hwnd: int = Field(gt=0)
     language: str = Field(default="en", min_length=2, max_length=16)
-    fps: float = Field(default=5.0, ge=1.0, le=12.0)
+    # `fps` remains the analysis-rate field used by existing desktop clients.
+    fps: float = Field(default=5.0, ge=1.0, le=20.0)
+    # Optional for backward compatibility: absent means capture at the old `fps` rate.
+    capture_fps: float | None = Field(default=None, ge=1.0, le=60.0)
     regions: list[dict[str, Any]] = Field(default_factory=list, max_length=8)
     native_overlay: bool = False
     capture_backend: Literal["legacy", "windows_graphics_capture"] = "legacy"
@@ -915,7 +918,8 @@ def start_runtime_capture(body: RuntimeCaptureStart, request: Request):
         result = runtime_capture.start(current_project_id(), body.hwnd, body.regions,
                                        body.language, body.fps,
                                        overlay_mode="native" if body.native_overlay else "python",
-                                       capture_backend=body.capture_backend)
+                                       capture_backend=body.capture_backend,
+                                       capture_fps=body.capture_fps)
         if body.native_overlay:
             result["overlay_mode"] = "native"
             result["message"] = "A captura começou. O desktop nativo controla a faixa sobre o jogo; a tela não é espelhada no DubSync."

@@ -67,6 +67,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         _api = new DubSyncApiClient(_preferences.ApiPort);
         InitializeComponent();
         DataContext = this;
+        RestoreWindowBounds();
         InitializeLayoutPersistence();
         LoadDockContent(DockManager.Layout);
         _defaultLayoutJson = SerializeLayoutToString();
@@ -132,7 +133,11 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         {
             if (SelectedProject is null)
                 return new WorkspaceStatusView("Captura · Fase 1", "Abra ou crie um projeto primeiro", "A captura precisa de um projeto ativo para separar sessões e evidências.", "Selecione um projeto no navegador à esquerda e volte a Captura.");
-            return new CaptureView(_api, SelectedProject);
+            return new CaptureView(_api, SelectedProject, _preferences.ActiveCaptureMode, mode =>
+            {
+                _preferences.ActiveCaptureMode = mode;
+                SavePreferencesQuietly();
+            });
         }
 
         if (page == "review")
@@ -156,13 +161,13 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         {
             return new WorkspaceStatusView("Projeto ativo", project.Name,
                 $"{project.GameTitle} · {project.Summary.Dialogues} falas · {project.Summary.Characters} personagens",
-                "A abertura foi registrada pela API local. A captura nativa está em migração; o fluxo Python existente e seu banco continuam disponíveis durante essa etapa.");
+                "O projeto está conectado ao banco atual. Use Captura para analisar um arquivo ou YouTube, iniciar a Captura Real e revisar as ocorrências preservadas.");
         }
 
         var pageInfo = page switch
         {
-            "capture" => ("FASE 1 · CAPTURA", "Captura por vídeo e Captura Real", "O workspace nativo está preparado para receber os painéis da Fase 1.", "A próxima fatia migrará a captura por vídeo preservando a API, OCR, sessões e evidências atuais. A Captura Real será adicionada como uma modalidade separada."),
-            "review" => ("FASE 1 · REVISÃO", "Revisão de falas", "A revisão nativa será ligada às mesmas ocorrências já armazenadas no DubSync.", "Este painel será migrado junto com Captura para manter texto corrigido, status, personagens e ocorrências sincronizados com o banco atual."),
+            "capture" => ("FASE 1 · CAPTURA", "Captura por vídeo e Captura Real", "Selecione um projeto para analisar vídeo local, YouTube ou o jogo em tempo real.", "A Captura nativa usa a API atual e grava sessões, diálogos e evidências no projeto selecionado."),
+            "review" => ("FASE 1 · REVISÃO", "Revisão de falas", "Selecione um projeto para revisar suas ocorrências.", "As correções usam as mesmas ocorrências e o mesmo banco do fluxo existente."),
             "dubbing" => ("FASE POSTERIOR", "Dublagem", "A migração desta etapa começa depois da estabilização de Captura.", "Personagens, perfis de voz, takes e geração em lote permanecem no DubSync atual durante esta fase."),
             "integration" => ("FASE POSTERIOR", "Integração", "Os adapters e a publicação serão migrados em uma etapa futura.", "Nenhum dado ou configuração do módulo atual é alterado pelo shell nativo."),
             "gameplay" => ("FASE FUTURA", "Hora da Jogatina", "O modo de acompanhamento ao jogar será desenvolvido após a Captura Real.", "A captura será seletiva por janela e ROI, com OCR condicionado a mudanças para reduzir o impacto no FPS."),
@@ -355,6 +360,125 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
     private void SaveLayout_Click(object sender, RoutedEventArgs e) => SaveLayout();
 
+    private void SaveMyLayout_Click(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            Directory.CreateDirectory(_preferencesStore.DirectoryPath);
+            var snapshot = new
+            {
+                active_page = _preferences.ActivePage,
+                capture_mode = _preferences.ActiveCaptureMode,
+                layout = SerializeLayoutToString()
+            };
+            var temporaryPath = _preferencesStore.MyLayoutPath + ".tmp";
+            File.WriteAllText(temporaryPath, JsonSerializer.Serialize(snapshot));
+            File.Move(temporaryPath, _preferencesStore.MyLayoutPath, overwrite: true);
+            HealthSummary = "Meu Layout salvo neste perfil do Windows";
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            ShowError("Não foi possível salvar Meu Layout", exception.Message);
+        }
+    }
+
+    private void RestoreMyLayout_Click(object sender, RoutedEventArgs e)
+    {
+        if (!File.Exists(_preferencesStore.MyLayoutPath))
+        {
+            ShowError("Meu Layout ainda não foi salvo", "Use Layouts → Salvar Meu Layout para guardar a disposição atual dos painéis.");
+            return;
+        }
+        try
+        {
+            using var document = JsonDocument.Parse(File.ReadAllText(_preferencesStore.MyLayoutPath));
+            var root = document.RootElement;
+            if (!root.TryGetProperty("layout", out var layout) || layout.ValueKind != JsonValueKind.String)
+                throw new InvalidDataException("O arquivo de Meu Layout está incompleto.");
+            var page = root.TryGetProperty("active_page", out var activePage) ? activePage.GetString() : null;
+            var captureMode = root.TryGetProperty("capture_mode", out var mode) ? mode.GetString() : null;
+            _preferences.ActivePage = string.IsNullOrWhiteSpace(page) ? "projects" : page;
+            _preferences.ActiveCaptureMode = string.Equals(captureMode, "real", StringComparison.OrdinalIgnoreCase) ? "real" : "video";
+            _layoutSerializer.Deserialize(layout.GetString()!);
+            MarkNavigation(_preferences.ActivePage);
+            SavePreferencesQuietly();
+            SaveLayout();
+        }
+        catch (Exception exception) when (exception is IOException or JsonException or InvalidOperationException or InvalidDataException)
+        {
+            ShowError("Não foi possível restaurar Meu Layout", exception.Message);
+        }
+    }
+
+    private void ApplyLayoutPreset_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is not MenuItem { Tag: string preset }) return;
+
+        var compact = preset == "compact";
+        switch (preset)
+        {
+            case "capture-video":
+                _preferences.ActivePage = "capture";
+                _preferences.ActiveCaptureMode = "video";
+                break;
+            case "capture-real":
+            case "two-monitors":
+                _preferences.ActivePage = "capture";
+                _preferences.ActiveCaptureMode = "real";
+                break;
+            case "review":
+                _preferences.ActivePage = "review";
+                break;
+            case "compact":
+                if (_preferences.ActivePage is "settings" or "project-active") _preferences.ActivePage = "capture";
+                break;
+            default:
+                return;
+        }
+
+        SetWorkspace(_preferences.ActivePage);
+        SetPresetPanels(compact);
+        if (preset == "two-monitors")
+        {
+            WindowState = WindowState.Maximized;
+            HealthSummary = "Captura Real pronta: mantenha o jogo em uma tela e mova o DubSync para a outra.";
+        }
+        else if (preset == "capture-real")
+        {
+            if (DockManager.Layout.Descendents().OfType<LayoutDocument>().FirstOrDefault(item => item.ContentId == "workspace")?.Content is CaptureView capture)
+                _ = capture.ShowRealCaptureAsync();
+        }
+        SavePreferencesQuietly();
+        SaveLayout();
+    }
+
+    private void SetPresetPanels(bool compact)
+    {
+        foreach (var id in new[] { "project-explorer", "project-properties", "diagnostics" })
+        {
+            var panel = FindAnchorable(id);
+            if (panel is null) continue;
+            if (id == "project-explorer" || !compact) panel.Show();
+            else panel.Hide();
+        }
+
+        SetDockWidth("project-explorer", compact ? 205 : 260);
+        SetDockWidth("project-properties", compact ? 245 : 310);
+        var diagnostics = FindAnchorable("diagnostics")?.Parent as LayoutAnchorablePane;
+        if (diagnostics is not null) diagnostics.DockHeight = new GridLength(compact ? 72 : 104, GridUnitType.Pixel);
+    }
+
+    private LayoutAnchorable? FindAnchorable(string contentId) =>
+        DockManager.Layout.Descendents().OfType<LayoutAnchorable>().FirstOrDefault(item => item.ContentId == contentId)
+        ?? DockManager.Layout.Hidden.FirstOrDefault(item => item.ContentId == contentId);
+
+    private void SetDockWidth(string contentId, double width)
+    {
+        var panel = FindAnchorable(contentId);
+        if (panel?.Parent is LayoutAnchorablePane pane)
+            pane.DockWidth = new GridLength(width, GridUnitType.Pixel);
+    }
+
     private void ResetLayout_Click(object sender, RoutedEventArgs e)
     {
         try
@@ -433,9 +557,47 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
     private void Window_Closing(object? sender, CancelEventArgs e)
     {
+        SaveWindowBounds();
         SaveLayout();
         SavePreferencesQuietly();
         _api.Dispose();
+    }
+
+    private void RestoreWindowBounds()
+    {
+        var width = _preferences.WindowWidth;
+        var height = _preferences.WindowHeight;
+        if (width is > 0 and <= 10000 && height is > 0 and <= 10000)
+        {
+            Width = Math.Max(MinWidth, width.Value);
+            Height = Math.Max(MinHeight, height.Value);
+            if (_preferences.WindowLeft is { } savedLeft && _preferences.WindowTop is { } savedTop)
+            {
+                WindowStartupLocation = WindowStartupLocation.Manual;
+                var minLeft = SystemParameters.VirtualScreenLeft;
+                var minTop = SystemParameters.VirtualScreenTop;
+                var maxLeft = Math.Max(minLeft, minLeft + SystemParameters.VirtualScreenWidth - Width);
+                var maxTop = Math.Max(minTop, minTop + SystemParameters.VirtualScreenHeight - Height);
+                Left = Math.Clamp(savedLeft, minLeft, maxLeft);
+                Top = Math.Clamp(savedTop, minTop, maxTop);
+            }
+        }
+        if (_preferences.WindowMaximized) WindowState = WindowState.Maximized;
+    }
+
+    private void SaveWindowBounds()
+    {
+        var bounds = WindowState == WindowState.Normal
+            ? new Rect(Left, Top, ActualWidth, ActualHeight)
+            : RestoreBounds;
+        if (bounds.Width >= MinWidth && bounds.Height >= MinHeight)
+        {
+            _preferences.WindowLeft = bounds.Left;
+            _preferences.WindowTop = bounds.Top;
+            _preferences.WindowWidth = bounds.Width;
+            _preferences.WindowHeight = bounds.Height;
+        }
+        _preferences.WindowMaximized = WindowState == WindowState.Maximized;
     }
 
     private void SavePreferencesQuietly()

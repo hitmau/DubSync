@@ -41,7 +41,17 @@
                     <Button x:Name="LayoutsButton" Content="▦  Layouts" Padding="12,8" Click="Layouts_Click">
                         <Button.ContextMenu>
                             <ContextMenu>
-                                <MenuItem Header="Salvar layout atual" Click="SaveLayout_Click" />
+                                <MenuItem Header="Presets">
+                                    <MenuItem Header="Captura padrão · Vídeo" Tag="capture-video" Click="ApplyLayoutPreset_Click" />
+                                    <MenuItem Header="Captura Real" Tag="capture-real" Click="ApplyLayoutPreset_Click" />
+                                    <MenuItem Header="Revisão" Tag="review" Click="ApplyLayoutPreset_Click" />
+                                    <MenuItem Header="Compacto" Tag="compact" Click="ApplyLayoutPreset_Click" />
+                                    <MenuItem Header="Dois monitores · Captura Real" Tag="two-monitors" Click="ApplyLayoutPreset_Click"
+                                              ToolTip="Abra o jogo em uma tela e mova o DubSync para a outra; o overlay da Captura Real permanece sobre o jogo." />
+                                </MenuItem>
+                                <Separator />
+                                <MenuItem Header="Salvar Meu Layout" Click="SaveMyLayout_Click" />
+                                <MenuItem Header="Restaurar Meu Layout" Click="RestoreMyLayout_Click" />
                                 <MenuItem Header="Restaurar layout padrão" Click="ResetLayout_Click" />
                                 <Separator />
                                 <MenuItem Header="Mostrar Navegador de projetos" Click="ShowExplorer_Click" />
@@ -54,13 +64,13 @@
             </DockPanel>
         </Border>
 
-    <avalonDock:DockingManager x:Name="DockManager" Grid.Row="1" Background="{StaticResource CanvasBrush}">
+    <avalonDock:DockingManager x:Name="DockManager" Grid.Row="1" Background="{StaticResource CanvasBrush}" AllowDetachedWindows="True">
             <avalonDock:DockingManager.Theme><themes:ArcDarkTheme /></avalonDock:DockingManager.Theme>
             <avalonDock:LayoutRoot>
                 <avalonDock:LayoutPanel Orientation="Vertical">
                     <avalonDock:LayoutPanel Orientation="Horizontal">
                         <avalonDock:LayoutAnchorablePane DockWidth="250">
-                            <avalonDock:LayoutAnchorable Title="Navegador de projetos" ContentId="project-explorer" CanClose="True" CanHide="True" />
+                            <avalonDock:LayoutAnchorable Title="Navegador de projetos" ContentId="project-explorer" CanClose="True" CanHide="True" CanFloat="True" />
                         </avalonDock:LayoutAnchorablePane>
 
                         <avalonDock:LayoutDocumentPane>
@@ -68,12 +78,12 @@
                         </avalonDock:LayoutDocumentPane>
 
                         <avalonDock:LayoutAnchorablePane DockWidth="285">
-                            <avalonDock:LayoutAnchorable Title="Propriedades do projeto" ContentId="project-properties" CanClose="True" CanHide="True" />
+                            <avalonDock:LayoutAnchorable Title="Propriedades do projeto" ContentId="project-properties" CanClose="True" CanHide="True" CanFloat="True" />
                         </avalonDock:LayoutAnchorablePane>
                     </avalonDock:LayoutPanel>
 
                     <avalonDock:LayoutAnchorablePane DockHeight="94">
-                        <avalonDock:LayoutAnchorable Title="Conexão e atividade" ContentId="diagnostics" CanClose="True" CanHide="True" />
+                        <avalonDock:LayoutAnchorable Title="Conexão e atividade" ContentId="diagnostics" CanClose="True" CanHide="True" CanFloat="True" />
                     </avalonDock:LayoutAnchorablePane>
                 </avalonDock:LayoutPanel>
             </avalonDock:LayoutRoot>

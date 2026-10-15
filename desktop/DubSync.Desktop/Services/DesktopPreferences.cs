@@ -9,6 +9,12 @@ public sealed class DesktopPreferences
     public double UiScale { get; set; } = 1.0;
     public string? ActiveProjectId { get; set; }
     public string ActivePage { get; set; } = "projects";
+    public string ActiveCaptureMode { get; set; } = "video";
+    public double? WindowLeft { get; set; }
+    public double? WindowTop { get; set; }
+    public double? WindowWidth { get; set; }
+    public double? WindowHeight { get; set; }
+    public bool WindowMaximized { get; set; }
 }
 
 public sealed class DesktopPreferencesStore
@@ -20,6 +26,7 @@ public sealed class DesktopPreferencesStore
 
     public string PreferencesPath => Path.Combine(DirectoryPath, "settings.json");
     public string LayoutPath => Path.Combine(DirectoryPath, "layout.json");
+    public string MyLayoutPath => Path.Combine(DirectoryPath, "my-layout.json");
 
     public DesktopPreferences Load()
     {

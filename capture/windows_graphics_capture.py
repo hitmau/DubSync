@@ -32,7 +32,7 @@ class WindowsGraphicsCaptureStream:
 
     def __init__(self, hwnd: int, fps: float = 5.0, capture_type=None):
         self.hwnd = int(hwnd)
-        self.fps = max(1.0, min(12.0, float(fps)))
+        self.fps = max(1.0, min(60.0, float(fps)))
         self._capture_type = capture_type
         self._condition = threading.Condition()
         self._capture: Any = None

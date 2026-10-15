@@ -188,7 +188,7 @@
                         <Grid>
                             <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="12"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
                             <StackPanel><TextBlock Text="Idioma" FontSize="11"/><TextBox x:Name="RuntimeLanguageInput" Text="en" Margin="0,4,0,0"/></StackPanel>
-                            <StackPanel Grid.Column="2"><TextBlock Text="Análise (FPS)" FontSize="11"/><ComboBox x:Name="RuntimeFpsSelector" SelectedIndex="1" Margin="0,4,0,0"><ComboBoxItem Content="2 FPS" Tag="2"/><ComboBoxItem Content="5 FPS" Tag="5"/><ComboBoxItem Content="8 FPS" Tag="8"/><ComboBoxItem Content="10 FPS" Tag="10"/></ComboBox></StackPanel>
+                            <StackPanel Grid.Column="2"><TextBlock Text="Perfil de desempenho" FontSize="11"/><ComboBox x:Name="RuntimeFpsSelector" SelectedIndex="1" Margin="0,4,0,0"><ComboBoxItem Content="Eco · Captura 15 / análise 5 FPS" Tag="15|5"/><ComboBoxItem Content="Balanceado · Captura 30 / análise 10 FPS" Tag="30|10"/><ComboBoxItem Content="Alta precisão · Captura 60 / análise 20 FPS" Tag="60|20"/></ComboBox></StackPanel>
                         </Grid>
                         <TextBlock Text="A ROI inicial usa os percentuais da captura por vídeo. Depois de iniciar, ajuste, adicione ou remova áreas diretamente sobre o jogo no overlay." FontSize="10" Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" Margin="0,12,0,0" />
                         <Button x:Name="StartRuntimeButton" Content="◎  Iniciar captura no jogo" Style="{StaticResource PrimaryButton}" Click="StartRuntimeCapture_Click" Padding="12,9" HorizontalAlignment="Stretch" Margin="0,16,0,0" />
@@ -203,7 +203,7 @@
                         <Grid>
                             <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
                             <StackPanel><TextBlock Text="MONITOR DA CAPTURA" FontSize="10" FontWeight="Bold" Foreground="{StaticResource MutedBrush}"/><TextBlock x:Name="RuntimeStateText" Text="Aguardando seleção de uma janela." FontSize="15" FontWeight="SemiBold" Margin="0,5,0,0"/></StackPanel>
-                            <TextBlock x:Name="RuntimeFpsText" Grid.Column="1" Text="— FPS" Foreground="{StaticResource TealBrush}" FontSize="11" FontWeight="Bold" VerticalAlignment="Center" />
+                            <TextBlock x:Name="RuntimeFpsText" Grid.Column="1" Text="Alvo: Captura — · Análise — FPS" Foreground="{StaticResource TealBrush}" FontSize="11" FontWeight="Bold" VerticalAlignment="Center" />
                         </Grid>
                         <ProgressBar x:Name="RuntimeProgress" Grid.Row="1" Minimum="0" Maximum="100" Height="5" Background="#263A52" Foreground="{StaticResource TealBrush}" BorderThickness="0" Margin="0,13,0,12" />
                         <Grid Grid.Row="2">

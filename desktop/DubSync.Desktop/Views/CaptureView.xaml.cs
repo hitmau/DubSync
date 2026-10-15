@@ -51,10 +51,12 @@ public partial class CaptureView : UserControl, INotifyPropertyChanged
     private bool _loaded;
     private bool _mediaOpened;
     private bool _runtimeRefreshing;
+    private bool _runtimeInitialized;
     private bool _isPlaying;
     private bool _isSeeking;
     private bool _isBusy;
     private bool _youtubeSourceSelected;
+    private bool _realCaptureSelected;
     private bool _roiDragging;
     private RoiDragMode _roiDragMode;
     private Point _roiPointerStart;
@@ -68,15 +70,18 @@ public partial class CaptureView : UserControl, INotifyPropertyChanged
     private string? _runtimeSessionId;
     private RuntimeOverlayWindow? _runtimeOverlay;
     private CaptureSession? _selectedSession;
+    private readonly Action<string>? _captureModeChanged;
     private string _projectLabel;
 
     public event PropertyChangedEventHandler? PropertyChanged;
     public string ProjectLabel { get => _projectLabel; private set => SetField(ref _projectLabel, value); }
 
-    public CaptureView(DubSyncApiClient api, ProjectSummary project)
+    public CaptureView(DubSyncApiClient api, ProjectSummary project, string initialCaptureMode = "video",
+        Action<string>? captureModeChanged = null)
     {
         _api = api;
         _project = project;
+        _captureModeChanged = captureModeChanged;
         _projectLabel = $"{project.Name}  ·  {project.GameTitle}";
         InitializeComponent();
         DataContext = this;
@@ -88,6 +93,7 @@ public partial class CaptureView : UserControl, INotifyPropertyChanged
         LanguageInput.Text = string.IsNullOrWhiteSpace(project.CaptureLanguage) ? "en" : project.CaptureLanguage;
         RuntimeLanguageInput.Text = LanguageInput.Text;
         SetVideoSourceMode(youtube: false);
+        SetCaptureModeVisuals(string.Equals(initialCaptureMode, "real", StringComparison.OrdinalIgnoreCase));
         _api.SetProjectScope(project.ProjectId);
         _pollTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(2) };
         _pollTimer.Tick += async (_, _) =>
@@ -111,6 +117,7 @@ public partial class CaptureView : UserControl, INotifyPropertyChanged
         _loaded = true;
         await RefreshSessionsAsync(true);
         if (_sessions.Any(session => session.IsRunning)) _pollTimer.Start();
+        if (_realCaptureSelected) await InitializeRealCaptureAsync();
     }
 
     private void View_Unloaded(object sender, RoutedEventArgs e)
@@ -748,10 +755,14 @@ public partial class CaptureView : UserControl, INotifyPropertyChanged
             return;
         }
         var fpsItem = RuntimeFpsSelector.SelectedItem as ComboBoxItem;
-        if (fpsItem?.Tag is null || !double.TryParse(fpsItem.Tag.ToString(),
-                System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var fps))
+        var rates = fpsItem?.Tag?.ToString()?.Split('|');
+        if (rates is not { Length: 2 } ||
+            !double.TryParse(rates[0], System.Globalization.NumberStyles.Float,
+                System.Globalization.CultureInfo.InvariantCulture, out var captureFps) ||
+            !double.TryParse(rates[1], System.Globalization.NumberStyles.Float,
+                System.Globalization.CultureInfo.InvariantCulture, out var analysisFps))
         {
-            SetRuntimeError("Selecione a frequência de análise.");
+            SetRuntimeError("Selecione um perfil de desempenho.");
             return;
         }
 
@@ -768,7 +779,8 @@ public partial class CaptureView : UserControl, INotifyPropertyChanged
             {
                 hwnd = window.Handle,
                 language,
-                fps,
+                fps = analysisFps,
+                capture_fps = captureFps,
                 native_overlay = true,
                 capture_backend = "windows_graphics_capture",
                 regions = new[] { new { x = x / 100, y = y / 100, width = width / 100, height = height / 100, name = "dialogue", roi_id = "dialogue" } }
@@ -942,12 +954,17 @@ public partial class CaptureView : UserControl, INotifyPropertyChanged
             var frames = ReadInt(progress, "frames_analyzed");
             var ocr = ReadInt(progress, "ocr_calls");
             var events = ReadInt(progress, "events_created");
-            var fps = ReadDouble(status, "fps");
+            var analysisFps = ReadDouble(status, "analysis_fps");
+            if (analysisFps <= 0) analysisFps = ReadDouble(status, "fps");
+            var captureFps = ReadDouble(status, "capture_fps");
+            if (captureFps <= 0) captureFps = analysisFps;
             var title = status.TryGetProperty("window", out var window) ? ReadString(window, "title") : "";
             RuntimeStateText.Text = $"{RuntimeStateLabel(state)}{(string.IsNullOrWhiteSpace(title) ? "" : " · " + title)}";
             if (!string.IsNullOrWhiteSpace(stage)) RuntimeStatsText.Text = $"{stage}   ·   {frames:N0} frames   ·   {ocr:N0} OCR   ·   {events:N0} falas";
             else RuntimeStatsText.Text = $"{frames:N0} frames   ·   {ocr:N0} OCR   ·   {events:N0} falas";
-            RuntimeFpsText.Text = fps > 0 ? $"{fps:0.#} FPS" : "— FPS";
+            RuntimeFpsText.Text = captureFps > 0 && analysisFps > 0
+                ? $"Alvo: Captura {captureFps:0.#} · Análise {analysisFps:0.#} FPS"
+                : "Alvo: Captura — · Análise — FPS";
             var active = state is "preparing" or "running" or "paused" or "stopping";
             RuntimeProgress.IsIndeterminate = state is "preparing" or "running" or "stopping";
             RuntimeProgress.Value = active ? 0 : 100;
@@ -1386,21 +1403,43 @@ public partial class CaptureView : UserControl, INotifyPropertyChanged
 
     private void VideoMode_Click(object sender, RoutedEventArgs e)
     {
-        VideoPanel.Visibility = Visibility.Visible;
-        RealCapturePanel.Visibility = Visibility.Collapsed;
-        VideoModeButton.Style = (Style)FindResource("PrimaryButton");
-        RealModeButton.ClearValue(StyleProperty);
+        SetCaptureModeVisuals(realCapture: false);
+        _captureModeChanged?.Invoke("video");
     }
 
-    private async void RealMode_Click(object sender, RoutedEventArgs e)
+    private async void RealMode_Click(object sender, RoutedEventArgs e) => await ShowRealCaptureAsync();
+
+    public async Task ShowRealCaptureAsync()
     {
+        SetCaptureModeVisuals(realCapture: true);
+        _captureModeChanged?.Invoke("real");
+        await InitializeRealCaptureAsync();
+    }
+
+    private void SetCaptureModeVisuals(bool realCapture)
+    {
+        _realCaptureSelected = realCapture;
+        VideoPanel.Visibility = realCapture ? Visibility.Collapsed : Visibility.Visible;
+        RealCapturePanel.Visibility = realCapture ? Visibility.Visible : Visibility.Collapsed;
+        if (realCapture)
+        {
+            RealModeButton.Style = (Style)FindResource("PrimaryButton");
+            VideoModeButton.ClearValue(StyleProperty);
+        }
+        else
+        {
+            VideoModeButton.Style = (Style)FindResource("PrimaryButton");
+            RealModeButton.ClearValue(StyleProperty);
+        }
+    }
+
+    private async Task InitializeRealCaptureAsync()
+    {
+        if (_runtimeInitialized) return;
+        _runtimeInitialized = true;
         VideoPlayer.Pause();
         _isPlaying = false;
         PlayPauseButton.Content = "▶";
-        VideoPanel.Visibility = Visibility.Collapsed;
-        RealCapturePanel.Visibility = Visibility.Visible;
-        RealModeButton.Style = (Style)FindResource("PrimaryButton");
-        VideoModeButton.ClearValue(StyleProperty);
         await RefreshRuntimeWindowsAsync();
         if (string.IsNullOrWhiteSpace(_runtimeSessionId)) await RestoreRuntimeSessionAsync();
         if (!string.IsNullOrWhiteSpace(_runtimeSessionId))

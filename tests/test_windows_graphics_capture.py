@@ -45,7 +45,8 @@ class _FakeCapture:
 
 
 class _FakeStream:
-    def __init__(self, _hwnd, _fps):
+    def __init__(self, _hwnd, fps):
+        self.fps = fps
         self.image = np.full((7, 11, 3), 91, dtype=np.uint8)
         self.paused = False
         self.stopped = False
@@ -90,6 +91,16 @@ class WindowsGraphicsCaptureTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "Backend de captura inválido"):
             LiveScreenFrameSource(10, [], capture_backend="unknown")
 
+    def test_capture_and_analysis_rates_are_independent_and_backward_compatible(self):
+        source = LiveScreenFrameSource(
+            10, [], fps=10, capture_backend="windows_graphics_capture", capture_fps=30,
+        )
+
+        self.assertEqual(source.sample_fps, 10)
+        self.assertEqual(source.capture_fps, 30)
+        legacy = LiveScreenFrameSource(10, [], fps=5)
+        self.assertEqual(legacy.sample_fps, legacy.capture_fps)
+
     @patch("Dupsync.capture.runtime_capture.os.name", "nt")
     @patch("Dupsync.capture.runtime_capture.client_window", return_value={
         "left": 0, "top": 0, "width": 11, "height": 7,
@@ -104,6 +115,23 @@ class WindowsGraphicsCaptureTests(unittest.TestCase):
         self.assertEqual(packet.image.shape, (7, 11, 3))
         self.assertEqual(packet.source_id, "game-window-1234")
         self.assertEqual(packet.timing_quality, "live_capture")
+        self.assertEqual(source._graphics_capture.fps, 5)
+        source.close()
+
+    @patch("Dupsync.capture.runtime_capture.os.name", "nt")
+    @patch("Dupsync.capture.runtime_capture.client_window", return_value={
+        "left": 0, "top": 0, "width": 11, "height": 7,
+    })
+    @patch("Dupsync.capture.runtime_capture.WindowsGraphicsCaptureStream", _FakeStream)
+    def test_native_stream_receives_capture_rate_separate_from_analysis_rate(self, _window):
+        source = LiveScreenFrameSource(
+            1234, [], fps=10, capture_backend="windows_graphics_capture", capture_fps=30,
+        )
+
+        source.open()
+
+        self.assertEqual(source._graphics_capture.fps, 30)
+        self.assertEqual(source.sample_fps, 10)
         source.close()
 
     @patch("Dupsync.capture.windows_graphics_capture.importlib.import_module",
